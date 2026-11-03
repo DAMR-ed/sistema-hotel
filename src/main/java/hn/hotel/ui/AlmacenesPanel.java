@@ -197,19 +197,23 @@ public class AlmacenesPanel extends JPanel implements Actualizable {
     private void formPunto(Integer id) {
         Map<String, Object> p = id == null ? null : Db.uno("SELECT * FROM puntos_venta WHERE id_punto = ?", id);
         JTextField nombre = new JTextField(p == null ? "" : Db.str(p.get("nombre")), 22);
-        JComboBox<String> tipo = new JComboBox<>(new String[]{"RESTAURANTE", "TIENDA", "BAR", "OTRO"});
+        JComboBox<String> tipo = new JComboBox<>(new String[]{"RESTAURANTE", "TIENDA", "BAR", "HOTEL", "OTRO"});
         if (p != null) tipo.setSelectedItem(Db.str(p.get("tipo")));
         JComboBox<AccionesHotel.Opcion> alm = AccionesHotel.combo(Db.query("SELECT id_almacen, nombre FROM almacenes WHERE activo = 1 ORDER BY es_principal DESC, nombre"), "id_almacen", "nombre", false);
         if (p != null) AccionesHotel.seleccionar(alm, Db.ent(p.get("id_almacen")));
         JCheckBox activo = new JCheckBox("Activo", p == null || Db.ent(p.get("activo")) == 1);
+        JTextField dir = new JTextField(p == null ? "" : Db.str(p.get("direccion")), 28), tel = new JTextField(p == null ? "" : Db.str(p.get("telefono")), 14);
         Campos.Formulario f = new Campos.Formulario();
-        f.agregar("Nombre:", nombre).agregar("Tipo:", tipo).agregar("Descarga del almacén:", alm).agregar("", activo);
+        f.agregar("Nombre:", nombre).agregar("Tipo:", tipo).agregar("Descarga del almacén:", alm)
+         .agregar("Dirección en la factura:", dir).agregar("Teléfono en la factura:", tel)
+         .nota("Dirección y teléfono son opcionales: si los llena, salen en las facturas emitidas con el CAI de este punto de venta.").agregar("", activo);
         Campos.dialogo(this, id == null ? "Nuevo punto de venta" : "Editar punto de venta", f, () -> {
             if (nombre.getText().isBlank()) throw new IllegalArgumentException("Escriba el nombre.");
-            if (id == null) Db.insert("INSERT INTO puntos_venta (nombre, tipo, id_almacen, activo) VALUES (?,?,?,?)",
-                    nombre.getText().trim(), tipo.getSelectedItem(), AccionesHotel.idDe(alm), activo.isSelected() ? 1 : 0);
-            else Db.exec("UPDATE puntos_venta SET nombre = ?, tipo = ?, id_almacen = ?, activo = ? WHERE id_punto = ?",
-                    nombre.getText().trim(), tipo.getSelectedItem(), AccionesHotel.idDe(alm), activo.isSelected() ? 1 : 0, id);
+            String d = dir.getText().isBlank() ? null : dir.getText().trim(), tl = tel.getText().isBlank() ? null : tel.getText().trim();
+            if (id == null) Db.insert("INSERT INTO puntos_venta (nombre, tipo, id_almacen, activo, direccion, telefono) VALUES (?,?,?,?,?,?)",
+                    nombre.getText().trim(), tipo.getSelectedItem(), AccionesHotel.idDe(alm), activo.isSelected() ? 1 : 0, d, tl);
+            else Db.exec("UPDATE puntos_venta SET nombre = ?, tipo = ?, id_almacen = ?, activo = ?, direccion = ?, telefono = ? WHERE id_punto = ?",
+                    nombre.getText().trim(), tipo.getSelectedItem(), AccionesHotel.idDe(alm), activo.isSelected() ? 1 : 0, d, tl, id);
             Bitacora.registrar(id == null ? "CREAR" : "EDITAR", "punto_venta", id == null ? 0 : id, nombre.getText().trim());
             return true;
         });

@@ -224,7 +224,7 @@ public final class FacturacionService {
                 throw new IllegalArgumentException("El pago (" + Ui.lempiras(pagado) + ") no cubre el total pendiente (" + Ui.lempiras(falta) + ").");
         }
 
-        tx.call("{CALL sp_siguiente_numero_factura(?, @p_cai, @p_num)}", "01");
+        tx.call("{CALL sp_siguiente_numero_factura(?, ?, @p_cai, @p_num)}", "01", Almacenes.puntoLocal());
         Map<String, Object> num = tx.uno("SELECT @p_cai AS cai, @p_num AS numero");
         long idFactura = tx.insert("INSERT INTO facturas (id_cai, numero_factura, id_estancia, id_huesped, cliente_nombre, cliente_rtn, "
                 + "importe_gravado_15, importe_gravado_18, importe_exento, importe_exonerado, descuento_total, isv_15, isv_18, tasa_turistica, total, "
@@ -333,7 +333,7 @@ public final class FacturacionService {
                 throw new IllegalArgumentException("Esta factura ya fue re-emitida.");
             String r = rtn == null || rtn.isBlank() ? null : rtn.trim();
             if (r != null && !r.matches("\\d{14}")) throw new IllegalArgumentException("El RTN debe tener 14 dígitos.");
-            tx.call("{CALL sp_siguiente_numero_factura(?, @p_cai, @p_num)}", "01");
+            tx.call("{CALL sp_siguiente_numero_factura(?, ?, @p_cai, @p_num)}", "01", Almacenes.puntoLocal());
             Map<String, Object> num = tx.uno("SELECT @p_cai AS cai, @p_num AS numero");
             long nid = tx.insert("INSERT INTO facturas (id_cai, numero_factura, id_estancia, id_huesped, cliente_nombre, cliente_rtn, importe_gravado_15, importe_gravado_18, "
                     + "importe_exento, importe_exonerado, descuento_total, isv_15, isv_18, tasa_turistica, total, constancia_exoneracion, origen, condicion_pago, "

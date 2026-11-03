@@ -56,8 +56,18 @@ public final class FacturarDialog {
         });
     }
 
+    private static long ultimoAvisoCai = 0;
+
     private static boolean mostrar(Component padre, String titulo, boolean permiteElegirHuesped, String origen, Integer idComandaOrigen,
                                    Integer idEstanciaOrigen, Fuente fuente) {
+        Integer punto = hn.hotel.service.Almacenes.puntoLocal();
+        String bloqueo = hn.hotel.service.CaiService.bloqueo(punto);
+        if (bloqueo != null) { Ui.error(padre, bloqueo); return false; }
+        String aviso = hn.hotel.service.CaiService.aviso(punto);
+        if (aviso != null && System.currentTimeMillis() - ultimoAvisoCai > 30 * 60 * 1000L) {   // máximo una vez cada 30 minutos
+            ultimoAvisoCai = System.currentTimeMillis();
+            Ui.info(padre, "Aviso del CAI:\n" + aviso);
+        }
         Vista inicial;
         try { inicial = fuente.vista(null, true, false); }
         catch (RuntimeException e) { Ui.error(padre, e.getMessage()); return false; }

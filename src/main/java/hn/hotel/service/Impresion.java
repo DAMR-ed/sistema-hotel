@@ -46,9 +46,20 @@ public final class Impresion {
     public static String n2(Object o) { return hn.hotel.ui.Ui.numero(o); }
 
     /** Encabezado común (nombre, RTN, dirección y teléfono del negocio). */
-    public static void encabezado(StringBuilder sb, int w) {
+    public static void encabezado(StringBuilder sb, int w) { encabezado(sb, w, null); }
+
+    /** Encabezado del ticket; si el CAI pertenece a un punto de venta con dirección o teléfono propios, se usan esos. */
+    public static void encabezado(StringBuilder sb, int w, Integer idCai) {
         sb.append(centrar(Config.texto("hotel_nombre", "Restaurante"), w)).append('\n');
         String rtn = Config.texto("hotel_rtn", ""), dir = Config.texto("hotel_direccion", ""), tel = Config.texto("hotel_telefono", "");
+        if (idCai != null) {
+            Map<String, Object> p = Db.uno("SELECT p.nombre, p.direccion, p.telefono FROM cai_autorizaciones c JOIN puntos_venta p ON p.id_punto = c.id_punto_venta WHERE c.id_cai = ?", idCai);
+            if (p != null) {
+                if (p.get("direccion") != null && !Db.str(p.get("direccion")).isBlank()) dir = Db.str(p.get("direccion"));
+                if (p.get("telefono") != null && !Db.str(p.get("telefono")).isBlank()) tel = Db.str(p.get("telefono"));
+                sb.append(centrar(Db.str(p.get("nombre")), w)).append('\n');
+            }
+        }
         if (!rtn.isBlank()) sb.append(centrar("RTN: " + rtn, w)).append('\n');
         if (!dir.isBlank()) sb.append(centrar(dir, w)).append('\n');
         if (!tel.isBlank()) sb.append(centrar("Tel: " + tel, w)).append('\n');
@@ -142,7 +153,7 @@ public final class Impresion {
         Integer idEstancia = f.get("id_estancia") != null ? Db.ent(f.get("id_estancia")) : cm != null && cm.get("id_estancia") != null ? Db.ent(cm.get("id_estancia")) : null;
 
         StringBuilder sb = new StringBuilder();
-        encabezado(sb, w);
+        encabezado(sb, w, Db.ent(f.get("id_cai")));
         sb.append(centrar("FACTURA" + ("ANULADA".equals(Db.str(f.get("estado"))) ? " *** ANULADA ***" : ""), w)).append('\n');
         sb.append(linea('-', w)).append('\n');
         sb.append("CAI: ").append(Db.str(f.get("cai"))).append('\n');

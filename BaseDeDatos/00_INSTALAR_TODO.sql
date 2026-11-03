@@ -2137,3 +2137,152 @@ END$$
 DELIMITER ;
 
 SELECT 'OK' AS resultado, (SELECT COUNT(*) FROM existencias) AS existencias, (SELECT COUNT(*) FROM puntos_venta) AS puntos_venta;
+
+-- ===== 19_cai_por_punto =====
+-- =====================================================================
+-- 19_cai_por_punto.sql  -  CAI por punto de venta, alarmas configurables y bloqueo al vencer
+-- Ejecutar UNA vez, con root, después de 18.
+--   * Cada CAI puede pertenecer a un punto de venta (sucursal/caja). Sin punto = CAI general.
+--   * Al facturar se usa primero el CAI del punto de venta de esa computadora; si no tiene, el general.
+--   * Vencido o agotado = no se puede facturar (el sistema lo bloquea y avisa).
+-- =====================================================================
+
+ALTER TABLE puntos_venta
+  MODIFY tipo ENUM('RESTAURANTE','TIENDA','BAR','HOTEL','OTRO') NOT NULL DEFAULT 'RESTAURANTE',
+  ADD COLUMN direccion VARCHAR(150) NULL,
+  ADD COLUMN telefono  VARCHAR(20)  NULL;
+
+ALTER TABLE cai_autorizaciones
+  ADD COLUMN id_punto_venta  INT UNSIGNED NULL,
+  ADD COLUMN alerta_dias     SMALLINT UNSIGNED NOT NULL DEFAULT 30,
+  ADD COLUMN alerta_numeros  INT UNSIGNED NOT NULL DEFAULT 50,
+  ADD KEY idx_cai_punto (id_punto_venta),
+  ADD CONSTRAINT fk_cai_punto FOREIGN KEY (id_punto_venta) REFERENCES puntos_venta (id_punto);
+
+DROP PROCEDURE IF EXISTS sp_siguiente_numero_factura;
+DROP VIEW IF EXISTS v_alertas;
+DELIMITER $$
+CREATE PROCEDURE sp_siguiente_numero_factura (
+  IN  p_tipo_documento CHAR(2),
+  IN  p_punto          INT UNSIGNED,
+  OUT p_id_cai         INT UNSIGNED,
+  OUT p_numero         CHAR(19)
+)
+BEGIN
+  DECLARE v_est CHAR(3);
+  DECLARE v_pto CHAR(3);
+  DECLARE v_sig INT UNSIGNED;
+
+  SET p_id_cai = NULL;
+  SET p_numero = NULL;
+
+  -- Primero el CAI propio del punto de venta; si no tiene, el CAI general (sin punto).
+  SELECT id_cai, establecimiento, punto_emision, siguiente_correlativo
+    INTO p_id_cai, v_est, v_pto, v_sig
+    FROM cai_autorizaciones
+   WHERE activo = 1
+     AND tipo_documento = p_tipo_documento
+     AND siguiente_correlativo <= rango_final
+     AND fecha_limite_emision >= CURDATE()
+     AND (id_punto_venta = p_punto OR id_punto_venta IS NULL)
+   ORDER BY (id_punto_venta IS NULL), fecha_limite_emision, id_cai
+   LIMIT 1
+   FOR UPDATE;
+
+  IF p_id_cai IS NULL THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = 'No hay un CAI vigente con números disponibles para este punto de venta';
+  END IF;
+
+  SET p_numero = CONCAT(v_est, '-', v_pto, '-', p_tipo_documento, '-', LPAD(v_sig, 8, '0'));
+
+  UPDATE cai_autorizaciones
+     SET siguiente_correlativo = siguiente_correlativo + 1
+   WHERE id_cai = p_id_cai;
+END$$
+DELIMITER ;
+
+CREATE VIEW v_alertas AS
+SELECT 'LLEGADA' AS tipo,
+       IF(r.fecha_llegada = CURDATE(), 'ALTA', 'MEDIA') AS severidad,
+       CAST(r.fecha_llegada AS DATETIME) AS fecha,
+       CONCAT('Llega ', hu.nombre, ' - hab. ', h.numero) AS mensaje,
+       'reserva' AS entidad, CAST(r.id_reserva AS CHAR) AS id_entidad
+FROM reservas r
+JOIN huespedes hu ON hu.id_huesped = r.id_huesped
+JOIN habitaciones h ON h.id_habitacion = r.id_habitacion
+WHERE r.estado IN ('PENDIENTE','CONFIRMADA')
+  AND r.fecha_llegada BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+UNION ALL
+SELECT 'RESERVA_VENCIDA', 'ALTA', CAST(r.fecha_llegada AS DATETIME),
+       CONCAT('No llegó: ', hu.nombre, ' - hab. ', h.numero, ' (era el ', DATE_FORMAT(r.fecha_llegada, '%d/%m/%Y'), ')'),
+       'reserva', CAST(r.id_reserva AS CHAR)
+FROM reservas r
+JOIN huespedes hu ON hu.id_huesped = r.id_huesped
+JOIN habitaciones h ON h.id_habitacion = r.id_habitacion
+WHERE r.estado IN ('PENDIENTE','CONFIRMADA') AND r.fecha_llegada < CURDATE()
+UNION ALL
+SELECT 'SALIDA', IF(e.salida_prevista < CURDATE(), 'ALTA', 'MEDIA'), CAST(e.salida_prevista AS DATETIME),
+       CONCAT(IF(e.salida_prevista < CURDATE(), 'Salida ATRASADA: ', 'Sale hoy: '), hu.nombre, ' - hab. ', h.numero),
+       'estancia', CAST(e.id_estancia AS CHAR)
+FROM estancias e
+JOIN huespedes hu ON hu.id_huesped = e.id_huesped
+JOIN habitaciones h ON h.id_habitacion = e.id_habitacion
+WHERE e.estado = 'ACTIVA' AND e.salida_prevista <= CURDATE()
+UNION ALL
+SELECT 'CREDITO_VENCIDO', 'ALTA', CAST(x.fecha_vencimiento AS DATETIME),
+       CONCAT('Factura ', x.numero_factura, ' de ', x.cliente, ' vencida hace ', x.dias_vencido, ' días. Saldo L ', x.saldo),
+       'cxc', CAST(x.id_cxc AS CHAR)
+FROM v_cuentas_por_cobrar x
+WHERE x.estado IN ('PENDIENTE','PARCIAL') AND x.fecha_vencimiento < CURDATE()
+UNION ALL
+SELECT 'STOCK_BAJO', IF(s.stock_actual <= 0, 'ALTA', 'MEDIA'), CAST(NOW() AS DATETIME),
+       CONCAT(s.nombre, ': quedan ', s.stock_actual, ' ', s.unidad_base, ' (mínimo ', s.stock_minimo, ')'),
+       'insumo', CAST(s.id_insumo AS CHAR)
+FROM v_stock_insumos s
+WHERE s.situacion IN ('AGOTADO','BAJO')
+UNION ALL
+SELECT 'CAI_POR_VENCER', IF(DATEDIFF(c.fecha_limite_emision, CURDATE()) <= 7, 'ALTA', 'MEDIA'), CAST(c.fecha_limite_emision AS DATETIME),
+       CONCAT('El CAI ', c.cai, ' (', COALESCE(pv.nombre, 'general'), ') vence el ', DATE_FORMAT(c.fecha_limite_emision, '%d/%m/%Y'),
+              ' - faltan ', DATEDIFF(c.fecha_limite_emision, CURDATE()), ' días'),
+       'cai', CAST(c.id_cai AS CHAR)
+FROM cai_autorizaciones c LEFT JOIN puntos_venta pv ON pv.id_punto = c.id_punto_venta
+WHERE c.activo = 1 AND c.siguiente_correlativo <= c.rango_final AND c.fecha_limite_emision >= CURDATE()
+  AND c.fecha_limite_emision <= DATE_ADD(CURDATE(), INTERVAL c.alerta_dias DAY)
+UNION ALL
+SELECT 'CAI_VENCIDO', 'ALTA', CAST(c.fecha_limite_emision AS DATETIME),
+       CONCAT('VENTAS BLOQUEADAS: el CAI ', c.cai, ' (', COALESCE(pv.nombre, 'general'), ') venció el ', DATE_FORMAT(c.fecha_limite_emision, '%d/%m/%Y'), '. Registre el nuevo CAI.'),
+       'cai', CAST(c.id_cai AS CHAR)
+FROM cai_autorizaciones c LEFT JOIN puntos_venta pv ON pv.id_punto = c.id_punto_venta
+WHERE c.activo = 1 AND c.siguiente_correlativo <= c.rango_final AND c.fecha_limite_emision < CURDATE()
+UNION ALL
+SELECT 'CAI_RANGO_AGOTANDO', IF((c.rango_final - c.siguiente_correlativo + 1) <= 10, 'ALTA', 'MEDIA'), CAST(NOW() AS DATETIME),
+       CONCAT('Quedan ', (c.rango_final - c.siguiente_correlativo + 1), ' números en el CAI ', c.cai, ' (', COALESCE(pv.nombre, 'general'), ')'),
+       'cai', CAST(c.id_cai AS CHAR)
+FROM cai_autorizaciones c LEFT JOIN puntos_venta pv ON pv.id_punto = c.id_punto_venta
+WHERE c.activo = 1 AND c.siguiente_correlativo <= c.rango_final AND c.fecha_limite_emision >= CURDATE()
+  AND (c.rango_final - c.siguiente_correlativo + 1) <= c.alerta_numeros
+UNION ALL
+SELECT 'CAI_AGOTADO', 'ALTA', CAST(NOW() AS DATETIME),
+       CONCAT('VENTAS BLOQUEADAS: se agotó el rango del CAI ', c.cai, ' (', COALESCE(pv.nombre, 'general'), '). Registre el nuevo CAI.'),
+       'cai', CAST(c.id_cai AS CHAR)
+FROM cai_autorizaciones c LEFT JOIN puntos_venta pv ON pv.id_punto = c.id_punto_venta
+WHERE c.activo = 1 AND c.siguiente_correlativo > c.rango_final
+  AND NOT EXISTS (SELECT 1 FROM cai_autorizaciones n WHERE n.activo = 1 AND n.tipo_documento = c.tipo_documento AND n.id_cai <> c.id_cai
+                  AND n.siguiente_correlativo <= n.rango_final AND n.fecha_limite_emision >= CURDATE()
+                  AND (n.id_punto_venta <=> c.id_punto_venta))
+UNION ALL
+SELECT 'PUNTO_SIN_CAI', 'ALTA', CAST(NOW() AS DATETIME),
+       CONCAT('El punto de venta ', p.nombre, ' no puede facturar: no tiene un CAI vigente con números disponibles.'),
+       'punto_venta', CAST(p.id_punto AS CHAR)
+FROM puntos_venta p
+WHERE p.activo = 1
+  AND NOT EXISTS (SELECT 1 FROM cai_autorizaciones n WHERE n.activo = 1 AND n.tipo_documento = '01'
+                  AND n.siguiente_correlativo <= n.rango_final AND n.fecha_limite_emision >= CURDATE()
+                  AND (n.id_punto_venta = p.id_punto OR n.id_punto_venta IS NULL))
+UNION ALL
+SELECT 'RECORDATORIO', 'MEDIA', rc.fecha_hora, rc.mensaje, 'recordatorio', CAST(rc.id_recordatorio AS CHAR)
+FROM recordatorios rc
+WHERE rc.estado = 'PENDIENTE' AND rc.fecha_hora <= DATE_ADD(NOW(), INTERVAL 1 DAY);
+
+SELECT 'OK' AS resultado;
