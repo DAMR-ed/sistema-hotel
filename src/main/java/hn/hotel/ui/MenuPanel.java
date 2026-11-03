@@ -13,7 +13,7 @@ import java.util.Map;
 
 /** Menú del restaurante (categorías y platos) y la receta de cada plato. */
 public class MenuPanel extends JPanel implements Actualizable {
-    private final DefaultTableModel mProd = Ui.modelo("Id", "Categoría", "Plato", "Precio", "Costo", "Margen", "Área", "Activo");
+    private final DefaultTableModel mProd = Ui.modelo("Id", "Categoría", "Plato", "Precio", "Costo", "Margen", "Existencias", "Área", "A la venta");
     private final JTable tProd = Ui.tabla(mProd);
     private final DefaultTableModel mReceta = Ui.modelo("Id insumo", "Ingrediente", "Cantidad", "Unidad", "Merma %", "Costo");
     private final JTable tReceta = Ui.tabla(mReceta);
@@ -27,7 +27,7 @@ public class MenuPanel extends JPanel implements Actualizable {
         JPanel izq = new JPanel(new BorderLayout(4, 4));
         izq.setBorder(BorderFactory.createTitledBorder("Platos y bebidas"));
         tProd.getColumnModel().getColumn(0).setMaxWidth(45);
-        Ui.alinearDerecha(tProd, 3, 4, 5);
+        Ui.alinearDerecha(tProd, 3, 4, 5, 6);
         izq.add(new JScrollPane(tProd), BorderLayout.CENTER);
         izq.add(Ui.fila(Ui.boton("Nuevo plato", () -> formularioProducto(null)),
                 Ui.boton("Editar", () -> { int id = Ui.idSeleccionado(tProd); if (id > 0) formularioProducto(id); else Ui.info(this, "Seleccione un plato."); }),
@@ -61,6 +61,7 @@ public class MenuPanel extends JPanel implements Actualizable {
         Ui.enSegundoPlano(this, () -> Db.query(
                 "SELECT p.id_producto, c.nombre AS categoria, p.nombre, p.precio, "
               + "COALESCE((SELECT SUM(rd.cantidad * (1 + rd.merma_pct/100) * i.costo_promedio) FROM receta_detalle rd JOIN insumos i ON i.id_insumo = rd.id_insumo WHERE rd.id_producto = p.id_producto), 0) AS costo, "
+              + "(SELECT MIN(FLOOR(i.stock_actual / (rd.cantidad * (1 + rd.merma_pct/100)))) FROM receta_detalle rd JOIN insumos i ON i.id_insumo = rd.id_insumo WHERE rd.id_producto = p.id_producto) AS disponible, "
               + "COALESCE(e.nombre, ce.nombre, 'Se sirve directo') AS area_preparacion, IF(p.activo=1,'Sí','No') AS activo FROM productos_menu p JOIN categorias_menu c ON c.id_categoria = p.id_categoria "
               + "LEFT JOIN estaciones e ON e.id_estacion = p.id_estacion LEFT JOIN estaciones ce ON ce.id_estacion = c.id_estacion "
               + "ORDER BY c.orden, p.nombre"),
@@ -71,7 +72,9 @@ public class MenuPanel extends JPanel implements Actualizable {
                     String margen = precio.signum() > 0 && costo.signum() > 0
                             ? precio.subtract(costo).multiply(BigDecimal.valueOf(100)).divide(precio, 0, RoundingMode.HALF_UP) + " %" : "-";
                     mProd.addRow(new Object[]{f.get("id_producto"), f.get("categoria"), f.get("nombre"), Ui.numero(precio),
-                            costo.signum() > 0 ? Ui.numero(costo) : "sin receta", margen, f.get("area_preparacion"), f.get("activo")});
+                            costo.signum() > 0 ? Ui.numero(costo) : "sin receta", margen,
+                            f.get("disponible") == null ? "no controla" : Db.dec(f.get("disponible")).setScale(0, RoundingMode.DOWN).toPlainString() + " disp.",
+                            f.get("area_preparacion"), f.get("activo")});
                 }
             });
     }
@@ -131,7 +134,7 @@ public class MenuPanel extends JPanel implements Actualizable {
         JTextField precio = new JTextField(p == null ? "" : Db.dec(p.get("precio")).toPlainString(), 10);
         JTextField desc = new JTextField(p == null ? "" : Db.str(p.get("descripcion")), 24);
         boolean tieneReceta = id != null && Db.scalar("SELECT 1 FROM receta_detalle WHERE id_producto = ? LIMIT 1", id) != null;
-        JCheckBox reventa = new JCheckBox("Producto de reventa: controlar su inventario (bebidas, snacks, tienda)");
+        JCheckBox reventa = new JCheckBox("Maneja existencias (reventa: bebidas, snacks, tienda): descuenta su propio inventario");
         reventa.setEnabled(!tieneReceta);
         if (tieneReceta) reventa.setText("Ya tiene receta / inventario (edítela abajo en «Receta»)");
         JTextField costoCompra = new JTextField("0.00", 10);
@@ -162,7 +165,7 @@ public class MenuPanel extends JPanel implements Actualizable {
             trat.addItem(new AccionesHotel.Opcion(Db.ent(t.get("id_tasa")), Db.str(t.get("nombre"))));
             tasaDe.put(Db.ent(t.get("id_tasa")), Db.dec(t.get("tasa")));
         }
-        JCheckBox activo = new JCheckBox("Disponible en el menú", p == null || Db.ent(p.get("activo")) == 1);
+        JCheckBox activo = new JCheckBox("Disponible para la venta en el POS", p == null || Db.ent(p.get("activo")) == 1);
         if (p != null) {
             AccionesHotel.seleccionar(cat, Db.ent(p.get("id_categoria")));
             AccionesHotel.seleccionar(estacion, "NINGUNA".equals(Db.str(p.get("area_preparacion"))) ? -1 : p.get("id_estacion") == null ? 0 : Db.ent(p.get("id_estacion")));
