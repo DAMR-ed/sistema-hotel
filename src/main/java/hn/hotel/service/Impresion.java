@@ -168,7 +168,11 @@ public final class Impresion {
         sb.append("Fecha: ").append(Db.str(f.get("fecha_txt"))).append('\n');
         sb.append("Mesa: ").append(cm == null ? "N/A" : Db.str(cm.get("donde"))).append('\n');
         datosHabitacion(sb, idEstancia);
-        if (f.get("constancia_exoneracion") != null) sb.append("No. Constancia: ").append(Db.str(f.get("constancia_exoneracion"))).append('\n');
+        if (f.get("constancia_exoneracion") != null) {
+            sb.append("Orden compra exenta: ").append(f.get("orden_compra_exenta") == null ? "-" : Db.str(f.get("orden_compra_exenta"))).append('\n');
+            sb.append("No. Constancia: ").append(Db.str(f.get("constancia_exoneracion"))).append('\n');
+            sb.append("Registro SAG: ").append(f.get("registro_sag") == null ? "-" : Db.str(f.get("registro_sag"))).append('\n');
+        }
         if ("CREDITO".equals(Db.str(f.get("condicion_pago")))) sb.append("Condicion: CREDITO\n");
         columnas(sb, w);
         for (Map<String, Object> d : Db.query("SELECT cantidad, descripcion, precio_unitario, descuento, subtotal, isv, tratamiento FROM factura_detalle WHERE id_factura = ? ORDER BY id_detalle", idFactura)) {

@@ -52,8 +52,60 @@ public final class FacturacionService {
 
     public record Pago(String metodo, BigDecimal monto, String referencia) {}
 
+    /**
+     * Datos de la venta. Exoneración (SAR): constanciaExoneracion = N.º correlativo de constancia de registro exonerado,
+     * ordenCompraExenta = N.º correlativo de orden de compra exenta, registroSag = N.º identificativo del registro de la SAG.
+     * idCliente = cliente registrado (para contado; en crédito es el mismo idClienteCredito).
+     */
     public record Opciones(Integer idHuesped, String nombre, String rtn, boolean credito, Integer idClienteCredito,
-                           List<Pago> pagos, String constanciaExoneracion, boolean aplicarDescuentoAdultoMayor) {}
+                           List<Pago> pagos, String constanciaExoneracion, boolean aplicarDescuentoAdultoMayor,
+                           Integer idCliente, String ordenCompraExenta, String registroSag) {
+        public Opciones(Integer idHuesped, String nombre, String rtn, boolean credito, Integer idClienteCredito,
+                        List<Pago> pagos, String constanciaExoneracion, boolean aplicarDescuentoAdultoMayor) {
+            this(idHuesped, nombre, rtn, credito, idClienteCredito, pagos, constanciaExoneracion, aplicarDescuentoAdultoMayor, null, null, null);
+        }
+        public Opciones conHuesped(Integer id) {
+            return new Opciones(id, nombre, rtn, credito, idClienteCredito, pagos, constanciaExoneracion, aplicarDescuentoAdultoMayor, idCliente, ordenCompraExenta, registroSag);
+        }
+        private static boolean lleno(String s) { return s != null && !s.isBlank(); }
+        /** Hay datos de exoneración: la venta se calcula sin ISV. */
+        public boolean exonerado() { return lleno(constanciaExoneracion) || lleno(ordenCompraExenta) || lleno(registroSag); }
+        /** El SAR exige los tres datos juntos. */
+        public void validarExoneracion() {
+            if (exonerado() && !(lleno(constanciaExoneracion) && lleno(ordenCompraExenta) && lleno(registroSag)))
+                throw new IllegalArgumentException("Para exonerar el ISV escriba los tres datos del SAR: N.º de orden de compra exenta, "
+                        + "N.º de constancia de registro exonerado y N.º identificativo del registro de la SAG.");
+        }
+    }
+
+    /**
+     * Revisa si una venta a crédito respeta el límite y no hay facturas vencidas.
+     * Devuelve null si todo está bien, o el motivo (que un supervisor puede autorizar saltarse).
+     */
+    public static String verificarCredito(Tx tx, int idCliente, BigDecimal total) throws Exception {
+        Map<String, Object> c = tx.uno("SELECT nombre, limite_credito, bloquear_vencidos FROM clientes_credito WHERE id_cliente_credito = ?", idCliente);
+        if (c == null) return "El cliente no existe.";
+        BigDecimal limite = Db.dec(c.get("limite_credito"));
+        BigDecimal saldo = Db.dec(tx.scalar("SELECT COALESCE(SUM(saldo),0) FROM cuentas_por_cobrar WHERE id_cliente_credito = ? AND estado IN ('PENDIENTE','PARCIAL')", idCliente));
+        StringBuilder sb = new StringBuilder();
+        if (limite.signum() == 0) sb.append("El cliente «").append(Db.str(c.get("nombre"))).append("» no tiene crédito autorizado (límite L 0.00).");
+        else if (saldo.add(total).compareTo(limite) > 0)
+            sb.append("Esta venta (").append(Ui.lempiras(total)).append(") sumada al saldo del cliente (").append(Ui.lempiras(saldo))
+              .append(") supera su límite de crédito (").append(Ui.lempiras(limite)).append(").");
+        if (Db.ent(c.get("bloquear_vencidos")) == 1) {
+            Map<String, Object> v = tx.uno("SELECT COUNT(*) AS n, COALESCE(SUM(saldo),0) AS s FROM cuentas_por_cobrar WHERE id_cliente_credito = ? "
+                    + "AND estado IN ('PENDIENTE','PARCIAL') AND fecha_vencimiento < CURDATE()", idCliente);
+            if (Db.ent(v.get("n")) > 0) {
+                if (sb.length() > 0) sb.append(' ');
+                sb.append("Tiene ").append(Db.ent(v.get("n"))).append(" factura(s) vencida(s) por ").append(Ui.lempiras(Db.dec(v.get("s")))).append('.');
+            }
+        }
+        return sb.length() == 0 ? null : sb.toString();
+    }
+
+    public static String verificarCredito(int idCliente, BigDecimal total) {
+        return Db.sin(tx -> verificarCredito(tx, idCliente, total));
+    }
 
     // ------------------------------------------------------------------ descuento adulto mayor
     /** Porcentaje que le corresponde al huésped por edad (0 si no aplica). Solo residentes con fecha de nacimiento. */
@@ -202,6 +254,8 @@ public final class FacturacionService {
         return new CuentaComanda(idComanda, donde, ls, Db.dec(c.get("propina")));
     }
 
+    private static String nulo(String s) { return s == null || s.isBlank() ? null : s.trim(); }
+
     // ------------------------------------------------------------------ emitir
     private static long emitir(Tx tx, Totales t, Opciones o, String origen, Integer idEstancia, BigDecimal anticipoAplicable) throws Exception {
         String nombre = o.nombre() == null || o.nombre().isBlank() ? "Consumidor Final" : o.nombre().trim();
@@ -217,6 +271,13 @@ public final class FacturacionService {
             if (cc == null) throw new IllegalArgumentException("El cliente de crédito no existe o está inactivo.");
             credito = o.idClienteCredito();
             vence = java.sql.Date.valueOf(LocalDate.now().plusDays(Db.ent(cc.get("dias_credito"))));
+            String problema = verificarCredito(tx, credito, t.total);
+            if (problema != null) {
+                // solo pasa si el usuario tiene el permiso o un supervisor lo autorizó en este momento
+                if (!Sesion.permite("credito.exceder")) throw new IllegalArgumentException(problema + "\nPida a un supervisor que lo autorice.");
+                tx.exec("SET @credito_autorizado = 1");
+                Bitacora.registrar("CREDITO_EXCEDIDO", "cliente_credito", credito, problema);
+            }
         } else {
             BigDecimal pagado = o.pagos().stream().map(Pago::monto).reduce(BigDecimal.ZERO, BigDecimal::add);
             BigDecimal falta = t.total.subtract(anticipoAplicable);
@@ -224,16 +285,20 @@ public final class FacturacionService {
                 throw new IllegalArgumentException("El pago (" + Ui.lempiras(pagado) + ") no cubre el total pendiente (" + Ui.lempiras(falta) + ").");
         }
 
+        Integer idCli = credito != null ? credito : o.idCliente();
+        if (credito == null && idCli != null && tx.scalar("SELECT 1 FROM clientes_credito WHERE id_cliente_credito = ?", idCli) == null) idCli = null;
+        o.validarExoneracion();
         tx.call("{CALL sp_siguiente_numero_factura(?, ?, @p_cai, @p_num)}", "01", Almacenes.puntoLocal());
         Map<String, Object> num = tx.uno("SELECT @p_cai AS cai, @p_num AS numero");
         long idFactura = tx.insert("INSERT INTO facturas (id_cai, numero_factura, id_estancia, id_huesped, cliente_nombre, cliente_rtn, "
                 + "importe_gravado_15, importe_gravado_18, importe_exento, importe_exonerado, descuento_total, isv_15, isv_18, tasa_turistica, total, "
-                + "constancia_exoneracion, origen, condicion_pago, id_cliente_credito, fecha_vencimiento, id_usuario) "
-                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                + "constancia_exoneracion, orden_compra_exenta, registro_sag, origen, condicion_pago, id_cliente_credito, fecha_vencimiento, id_usuario) "
+                + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 num.get("cai"), num.get("numero"), idEstancia, o.idHuesped(), nombre, rtn,
                 t.gravado15, t.gravado18, t.exento, t.exonerado, t.descuento, t.isv15, t.isv18, t.tasaTuristica, t.total,
-                o.constanciaExoneracion() == null || o.constanciaExoneracion().isBlank() ? null : o.constanciaExoneracion().trim(),
-                origen, o.credito() ? "CREDITO" : "CONTADO", credito, vence, Sesion.idUsuario);
+                nulo(o.constanciaExoneracion()), nulo(o.ordenCompraExenta()), nulo(o.registroSag()),
+                origen, o.credito() ? "CREDITO" : "CONTADO", idCli, vence, Sesion.idUsuario);
+        if (o.credito()) tx.exec("SET @credito_autorizado = 0");
         for (Detalle d : t.detalles)
             tx.exec("INSERT INTO factura_detalle (id_factura, tipo, descripcion, cantidad, precio_unitario, descuento, tratamiento, tasa_isv, subtotal, isv) VALUES (?,?,?,?,?,?,?,?,?,?)",
                     idFactura, d.tipo(), d.descripcion().length() > 150 ? d.descripcion().substring(0, 150) : d.descripcion(), d.cantidad(), d.precio(),
@@ -265,11 +330,12 @@ public final class FacturacionService {
     /** Check-out: factura hospedaje + consumos pendientes, cierra la estadía y deja la habitación en limpieza. */
     public static long facturarEstancia(int idEstancia, Opciones o) {
         return Db.transaccion(tx -> {
+            o.validarExoneracion();
             CuentaEstancia c = cuentaEstancia(tx, idEstancia, true);
             BigDecimal pct = o.aplicarDescuentoAdultoMayor() ? porcentajeAdultoMayor(tx, c.idHuesped(), LocalDate.now()) : BigDecimal.ZERO;
-            Totales t = calcularConConfig(tx, c.lineas(), pct, o.constanciaExoneracion() != null && !o.constanciaExoneracion().isBlank());
+            Totales t = calcularConConfig(tx, c.lineas(), pct, o.exonerado());
             BigDecimal anticipo = c.anticipo().min(t.total);
-            Opciones op = o.idHuesped() == null ? new Opciones(c.idHuesped(), o.nombre(), o.rtn(), o.credito(), o.idClienteCredito(), o.pagos(), o.constanciaExoneracion(), o.aplicarDescuentoAdultoMayor()) : o;
+            Opciones op = o.idHuesped() == null ? o.conHuesped(c.idHuesped()) : o;
             long idFactura = emitir(tx, t, op, "HOSPEDAJE", idEstancia, anticipo);
 
             for (Linea l : c.lineas()) if (l.idConsumo() != null) tx.exec("UPDATE consumos SET facturado = 1 WHERE id_consumo = ?", l.idConsumo());
@@ -291,10 +357,11 @@ public final class FacturacionService {
     /** Cobra y factura toda la mesa (numCuenta null) o una subcuenta (cuentas divididas). */
     public static long facturarCuenta(int idComanda, Integer numCuenta, Opciones o) {
         if (!RestauranteService.puedeCobrar()) throw new IllegalArgumentException("Su usuario no puede cobrar. Pida a un cajero o supervisor.");
+        o.validarExoneracion();
         return Db.transaccion(tx -> {
             CuentaComanda c = cuentaComanda(tx, idComanda, true, numCuenta);
             BigDecimal pct = o.aplicarDescuentoAdultoMayor() ? porcentajeAdultoMayor(tx, o.idHuesped(), LocalDate.now()) : BigDecimal.ZERO;
-            Totales t = calcularConConfig(tx, c.lineas(), pct, o.constanciaExoneracion() != null && !o.constanciaExoneracion().isBlank());
+            Totales t = calcularConConfig(tx, c.lineas(), pct, o.exonerado());
             tx.call("{CALL sp_descontar_inventario_comanda(?)}", idComanda);
             long idFactura = emitir(tx, t, o, "RESTAURANTE", null, BigDecimal.ZERO);
             if (numCuenta != null)
@@ -313,8 +380,7 @@ public final class FacturacionService {
     // ------------------------------------------------------------------ anular / re-emitir
     public static void anular(int idFactura, String motivo) {
         if (motivo == null || motivo.trim().length() < 5) throw new IllegalArgumentException("Escriba el motivo de la anulación (mínimo 5 letras).");
-        if (!Sesion.esAdmin() && !"CAJERO".equals(Sesion.rol) && !"CONTADOR".equals(Sesion.rol))
-            throw new IllegalArgumentException("Su usuario no puede anular facturas.");
+        if (!Sesion.permite("factura.anular")) throw new IllegalArgumentException("Su usuario no puede anular facturas.");
         Db.transaccion(tx -> {
             int n = tx.exec("UPDATE facturas SET estado = 'ANULADA', motivo_anulacion = ?, id_usuario_anula = ? WHERE id_factura = ? AND estado = 'EMITIDA'",
                     motivo.trim(), Sesion.idUsuario, idFactura);
@@ -336,9 +402,9 @@ public final class FacturacionService {
             tx.call("{CALL sp_siguiente_numero_factura(?, ?, @p_cai, @p_num)}", "01", Almacenes.puntoLocal());
             Map<String, Object> num = tx.uno("SELECT @p_cai AS cai, @p_num AS numero");
             long nid = tx.insert("INSERT INTO facturas (id_cai, numero_factura, id_estancia, id_huesped, cliente_nombre, cliente_rtn, importe_gravado_15, importe_gravado_18, "
-                    + "importe_exento, importe_exonerado, descuento_total, isv_15, isv_18, tasa_turistica, total, constancia_exoneracion, origen, condicion_pago, "
+                    + "importe_exento, importe_exonerado, descuento_total, isv_15, isv_18, tasa_turistica, total, constancia_exoneracion, orden_compra_exenta, registro_sag, origen, condicion_pago, "
                     + "id_cliente_credito, fecha_vencimiento, id_usuario) SELECT ?,?,id_estancia,id_huesped,?,?,importe_gravado_15,importe_gravado_18,importe_exento,"
-                    + "importe_exonerado,descuento_total,isv_15,isv_18,tasa_turistica,total,constancia_exoneracion,origen,condicion_pago,id_cliente_credito,fecha_vencimiento,? "
+                    + "importe_exonerado,descuento_total,isv_15,isv_18,tasa_turistica,total,constancia_exoneracion,orden_compra_exenta,registro_sag,origen,condicion_pago,id_cliente_credito,fecha_vencimiento,? "
                     + "FROM facturas WHERE id_factura = ?", num.get("cai"), num.get("numero"), nombre.isBlank() ? f.get("cliente_nombre") : nombre.trim(), r, Sesion.idUsuario, idFacturaAnulada);
             tx.exec("INSERT INTO factura_detalle (id_factura, tipo, descripcion, cantidad, precio_unitario, descuento, tratamiento, tasa_isv, subtotal, isv) "
                   + "SELECT ?, tipo, descripcion, cantidad, precio_unitario, descuento, tratamiento, tasa_isv, subtotal, isv FROM factura_detalle WHERE id_factura = ?", nid, idFacturaAnulada);

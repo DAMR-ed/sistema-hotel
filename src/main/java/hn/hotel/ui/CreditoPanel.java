@@ -10,12 +10,10 @@ import java.awt.*;
 import java.math.BigDecimal;
 import java.util.Map;
 
-/** Clientes con crédito, cuentas por cobrar, abonos y antigüedad de saldos. */
+/** Cuentas por cobrar, abonos y cobranza. Los clientes se administran en el módulo «Clientes». */
 public class CreditoPanel extends JPanel implements Actualizable {
     private final DefaultTableModel mCxc = Ui.modelo("Id", "Factura", "Cliente", "Emisión", "Vence", "Monto", "Saldo", "Días vencida", "Estado");
     private final JTable tCxc = Ui.tabla(mCxc);
-    private final DefaultTableModel mCli = Ui.modelo("Id", "Cliente", "RTN", "Contacto", "Teléfono", "Límite", "Días crédito", "Saldo actual", "Activo");
-    private final JTable tCli = Ui.tabla(mCli);
     private final JCheckBox soloPendientes = new JCheckBox("Solo con saldo", true);
 
     public CreditoPanel() {
@@ -28,36 +26,23 @@ public class CreditoPanel extends JPanel implements Actualizable {
         Ui.alinearDerecha(tCxc, 5, 6, 7);
         cxc.add(new JScrollPane(tCxc), BorderLayout.CENTER);
         cxc.add(Ui.fila(soloPendientes, Ui.boton("Registrar abono", this::abonar), Ui.boton("Ver factura", this::verFactura),
-                Ui.boton("Abonos de la cuenta", this::verAbonos), Ui.boton("Antigüedad de saldos", this::antiguedad),
+                Ui.boton("Abonos de la cuenta", this::verAbonos), Ui.boton("Antigüedad de saldos", () -> ReporteDialog.mostrar(this, "Antigüedad de saldos por cobrar (análisis de vencimiento)", null)),
+                Ui.boton("Estado de cuenta del cliente", this::estadoCuenta), Ui.boton("Relación de cobros", () -> ReporteDialog.mostrar(this, "Relación de cobros (contado y abonos)", null)),
                 Ui.boton("Exportar (CSV)", () -> Exportar.csv(this, mCxc, "cuentas_por_cobrar"))), BorderLayout.SOUTH);
         soloPendientes.addActionListener(e -> alMostrar());
 
-        JPanel cli = new JPanel(new BorderLayout(4, 4));
-        tCli.getColumnModel().getColumn(0).setMaxWidth(45);
-        Ui.alinearDerecha(tCli, 5, 6, 7);
-        cli.add(new JScrollPane(tCli), BorderLayout.CENTER);
-        cli.add(Ui.fila(Ui.boton("Nuevo cliente de crédito", () -> formulario(null)),
-                Ui.boton("Editar", () -> { int id = Ui.idSeleccionado(tCli); if (id > 0) formulario(id); else Ui.info(this, "Seleccione un cliente."); })), BorderLayout.SOUTH);
-
-        JTabbedPane tabs = new JTabbedPane();
-        tabs.addTab("Cuentas por cobrar", cxc);
-        tabs.addTab("Clientes de crédito", cli);
-        add(tabs, BorderLayout.CENTER);
+        add(cxc, BorderLayout.CENTER);
     }
 
     @Override public void alMostrar() {
         boolean pend = soloPendientes.isSelected();
         Ui.enSegundoPlano(this, () -> Db.sin(tx -> new Object[]{
                 tx.query("SELECT id_cxc, numero_factura, cliente, fecha_emision, fecha_vencimiento, monto, saldo, dias_vencido, estado FROM v_cuentas_por_cobrar "
-                        + (pend ? "WHERE estado IN ('PENDIENTE','PARCIAL') " : "") + "ORDER BY fecha_vencimiento LIMIT 1000"),
-                tx.query("SELECT c.id_cliente_credito, c.nombre, c.rtn, c.contacto, c.telefono, c.limite_credito, c.dias_credito, "
-                        + "COALESCE((SELECT SUM(x.saldo) FROM cuentas_por_cobrar x WHERE x.id_cliente_credito = c.id_cliente_credito AND x.estado IN ('PENDIENTE','PARCIAL')),0) AS saldo, "
-                        + "IF(c.activo=1,'Sí','No') AS act FROM clientes_credito c ORDER BY c.nombre")}),
+                        + (pend ? "WHERE estado IN ('PENDIENTE','PARCIAL') " : "") + "ORDER BY fecha_vencimiento LIMIT 1000")
+                }),
             r -> {
                 @SuppressWarnings("unchecked") var a = (java.util.List<Map<String, Object>>) r[0];
-                @SuppressWarnings("unchecked") var b = (java.util.List<Map<String, Object>>) r[1];
                 Ui.llenar(mCxc, a, "id_cxc", "numero_factura", "cliente", "fecha_emision", "fecha_vencimiento", "monto", "saldo", "dias_vencido", "estado");
-                Ui.llenar(mCli, b, "id_cliente_credito", "nombre", "rtn", "contacto", "telefono", "limite_credito", "dias_credito", "saldo", "act");
             });
     }
 
@@ -114,33 +99,10 @@ public class CreditoPanel extends JPanel implements Actualizable {
             Exportar.csv(this, m, "antiguedad_saldos");
     }
 
-    private void formulario(Integer id) {
-        Map<String, Object> c = id == null ? null : Db.uno("SELECT * FROM clientes_credito WHERE id_cliente_credito = ?", id);
-        JTextField nombre = new JTextField(c == null ? "" : Db.str(c.get("nombre")), 24), rtn = new JTextField(c == null ? "" : Db.str(c.get("rtn")), 14),
-                contacto = new JTextField(c == null ? "" : Db.str(c.get("contacto")), 18), tel = new JTextField(c == null ? "" : Db.str(c.get("telefono")), 14),
-                email = new JTextField(c == null ? "" : Db.str(c.get("email")), 22), dir = new JTextField(c == null ? "" : Db.str(c.get("direccion")), 24),
-                limite = new JTextField(c == null ? "0" : Db.dec(c.get("limite_credito")).toPlainString(), 12);
-        JSpinner dias = Campos.entero(c == null ? 30 : Db.ent(c.get("dias_credito")), 1, 365);
-        JCheckBox activo = new JCheckBox("Activo", c == null || Db.ent(c.get("activo")) == 1);
-        Campos.Formulario f = new Campos.Formulario();
-        f.agregar("Nombre / razón social:", nombre).agregar("RTN (14 dígitos):", rtn).agregar("Contacto:", contacto).agregar("Teléfono:", tel)
-         .agregar("Correo:", email).agregar("Dirección:", dir).agregar("Límite de crédito (L):", limite).agregar("Días de crédito:", dias).agregar("", activo)
-         .nota("Con límite 0 el cliente no puede comprar a crédito.");
-        Campos.dialogo(this, id == null ? "Nuevo cliente de crédito" : "Editar cliente", f, () -> {
-            if (nombre.getText().isBlank()) throw new IllegalArgumentException("Escriba el nombre.");
-            String r = rtn.getText().trim();
-            if (!r.isEmpty() && !r.matches("\\d{14}")) throw new IllegalArgumentException("El RTN debe tener 14 dígitos.");
-            BigDecimal lim = Ui.leerDinero(limite.getText(), "límite");
-            if (lim.signum() < 0) throw new IllegalArgumentException("El límite no puede ser negativo.");
-            Object[] v = {nombre.getText().trim(), r.isEmpty() ? null : r, nv(contacto), nv(tel), nv(email), nv(dir), lim, Campos.valorEntero(dias), activo.isSelected() ? 1 : 0};
-            if (id == null) Db.insert("INSERT INTO clientes_credito (nombre, rtn, contacto, telefono, email, direccion, limite_credito, dias_credito, activo) VALUES (?,?,?,?,?,?,?,?,?)", v);
-            else Db.exec("UPDATE clientes_credito SET nombre=?, rtn=?, contacto=?, telefono=?, email=?, direccion=?, limite_credito=?, dias_credito=?, activo=? WHERE id_cliente_credito=?",
-                    v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], id);
-            Bitacora.registrar(id == null ? "CREAR" : "EDITAR", "cliente_credito", id, nombre.getText().trim() + " límite " + lim);
-            return true;
-        });
-        alMostrar();
+    private void estadoCuenta() {
+        int id = Ui.idSeleccionado(tCxc);
+        if (id < 0) { Ui.info(this, "Seleccione una cuenta del cliente."); return; }
+        Object cli = Db.scalar("SELECT id_cliente_credito FROM cuentas_por_cobrar WHERE id_cxc = ?", id);
+        ReporteDialog.mostrar(this, "Estado de cuenta de cliente", Map.of("cliente", Db.ent(cli)));
     }
-
-    private static String nv(JTextField t) { return t.getText().isBlank() ? null : t.getText().trim(); }
 }

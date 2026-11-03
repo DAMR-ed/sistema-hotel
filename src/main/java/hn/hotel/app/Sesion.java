@@ -17,14 +17,14 @@ public final class Sesion {
 
     /** Módulos que ve cada rol. ADMIN ve todo. */
     private static final Map<String, Set<String>> PERMISOS = Map.of(
-            "SUPERVISOR", Set.of("inicio", "autoconsumo", "pos_retail", "cortes", "pos_rest", "cocina", "restaurante", "menu", "estaciones", "inventario", "manufactura", "compras", "almacenes", "facturacion", "credito", "vpos", "alarmas", "reportes"),
-            "RECEPCION", Set.of("inicio", "pos_retail", "cortes", "plano", "reservas", "estancias", "huespedes", "facturacion", "credito", "alarmas", "reportes", "pos_rest"),
+            "SUPERVISOR", Set.of("inicio", "autoconsumo", "pos_retail", "cortes", "pos_rest", "cocina", "restaurante", "menu", "estaciones", "inventario", "manufactura", "compras", "almacenes", "facturacion", "credito", "vpos", "alarmas", "reportes", "clientes", "proveedores", "zonas"),
+            "RECEPCION", Set.of("inicio", "pos_retail", "cortes", "plano", "reservas", "estancias", "huespedes", "facturacion", "credito", "alarmas", "reportes", "pos_rest", "clientes"),
             "AMA_LLAVES", Set.of("inicio", "plano", "alarmas"),
-            "CAJERO", Set.of("inicio", "pos_retail", "cortes", "facturacion", "credito", "vpos", "pos_rest", "reportes", "alarmas"),
+            "CAJERO", Set.of("inicio", "pos_retail", "cortes", "facturacion", "credito", "vpos", "pos_rest", "reportes", "alarmas", "clientes"),
             "MESERO", Set.of("inicio", "pos_rest"),
             "COCINA", Set.of("inicio", "cocina"),
-            "BODEGA", Set.of("inicio", "autoconsumo", "inventario", "manufactura", "compras", "almacenes", "alarmas"),
-            "CONTADOR", Set.of("inicio", "autoconsumo", "cortes", "compras", "facturacion", "credito", "vpos", "reportes", "fiscal", "impuestos")
+            "BODEGA", Set.of("inicio", "autoconsumo", "inventario", "manufactura", "compras", "almacenes", "alarmas", "proveedores"),
+            "CONTADOR", Set.of("inicio", "autoconsumo", "cortes", "compras", "facturacion", "credito", "vpos", "reportes", "fiscal", "impuestos", "clientes", "proveedores", "zonas")
     );
 
     /** Tipo de negocio (configuración «modulo_hotel» y «modulo_restaurante»): permite usar el sistema solo para restaurante o solo para hotel. */
@@ -75,6 +75,9 @@ public final class Sesion {
         ACCIONES.put("inventario.ajustar", "Ajustar existencias del inventario");
         ACCIONES.put("compras.anular", "Anular compras en borrador");
         ACCIONES.put("config.editar", "Cambiar la configuración del sistema");
+        ACCIONES.put("credito.exceder", "Vender a crédito pasando el límite o a clientes con facturas vencidas");
+        ACCIONES.put("clientes.limite", "Cambiar el límite de crédito de clientes y proveedores");
+        ACCIONES.put("clientes.exento", "Marcar clientes o proveedores como exentos / exonerados de ISV");
     }
 
     private static final Set<String> TODAS_POS = new java.util.LinkedHashSet<>(ACCIONES.keySet());
@@ -83,7 +86,7 @@ public final class Sesion {
             "RECEPCION", Set.of("pos.cobrar", "pos.precuenta", "pos.dividir", "pos.cambiar_mesa", "pos.cargar_habitacion", "pos.ver_todas", "pos.cambiar_lista", "pos.corte_x", "pos.borrar_linea", "pos.cambiar_cantidad"),
             "CAJERO", Set.of("pos.cobrar", "pos.precuenta", "pos.dividir", "pos.cambiar_mesa", "pos.cargar_habitacion", "pos.ver_todas", "pos.cambiar_lista", "pos.corte_x", "pos.borrar_linea", "pos.cambiar_cantidad"),
             "MESERO", Set.of("pos.precuenta", "pos.dividir", "pos.cambiar_mesa", "pos.borrar_linea", "pos.cambiar_cantidad"),
-            "CONTADOR", Set.of("compras.pagar", "factura.anular", "factura.reemitir", "fiscal.cai", "compras.anular"),
+            "CONTADOR", Set.of("compras.pagar", "factura.anular", "factura.reemitir", "fiscal.cai", "compras.anular", "clientes.limite", "clientes.exento"),
             "BODEGA", Set.of("pos.traspasos", "inventario.carga_masiva", "inventario.ajustar", "compras.anular")
     );
 

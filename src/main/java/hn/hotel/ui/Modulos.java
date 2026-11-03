@@ -37,6 +37,10 @@ public final class Modulos {
                 new Modulo("cortes", "Cortes de caja (X y Z)", "FACTURACIÓN", CortesPanel::new),
                 new Modulo("vpos", "Pagos con tarjeta", "FACTURACIÓN", VposPanel::new),
 
+                new Modulo("clientes", "Clientes", "CLIENTES Y PROVEEDORES", ClientesPanel::new),
+                new Modulo("proveedores", "Proveedores", "CLIENTES Y PROVEEDORES", ProveedoresPanel::new),
+                new Modulo("zonas", "Zonas", "CLIENTES Y PROVEEDORES", ZonasPanel::new),
+
                 new Modulo("alarmas", "Alarmas", "CONTROL", AlarmasPanel::new),
                 new Modulo("reportes", "Reportes", "CONTROL", ReportesPanel::new),
                 new Modulo("impuestos", "Impuestos (ISV)", "CONTROL", ImpuestosPanel::new),

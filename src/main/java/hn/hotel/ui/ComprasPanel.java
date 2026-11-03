@@ -20,8 +20,6 @@ import java.util.Map;
 public class ComprasPanel extends JPanel implements Actualizable {
     private final DefaultTableModel mCompras = Ui.modelo("Id", "Fecha", "Proveedor", "Almacén", "Documento", "Estado", "Pago", "Vence", "Total");
     private final JTable tCompras = Ui.tabla(mCompras);
-    private final DefaultTableModel mProv = Ui.modelo("Id", "Proveedor", "RTN", "Contacto", "Teléfono", "Días crédito", "Activo");
-    private final JTable tProv = Ui.tabla(mProv);
     private final DefaultTableModel mCxp = Ui.modelo("Id", "Proveedor", "Factura", "Emisión", "Vence", "Estado", "Monto", "Saldo");
     private final JTable tCxp = Ui.tabla(mCxp);
     private final JCheckBox soloPendientes = new JCheckBox("Solo pendientes", true);
@@ -40,12 +38,6 @@ public class ComprasPanel extends JPanel implements Actualizable {
         compras.add(Ui.fila(Ui.boton("Nueva compra", this::nuevaCompra), Ui.boton("Ver detalle", this::verDetalle),
                 Ui.boton("Recibir (borrador)", this::recibir), Ui.boton("Anular borrador", () -> Autorizacion.ejecutar(this, "compras.anular", "anular compras", this::anularBorrador))), BorderLayout.SOUTH);
 
-        JPanel prov = new JPanel(new BorderLayout(6, 6));
-        tProv.getColumnModel().getColumn(0).setMaxWidth(50);
-        prov.add(new JScrollPane(tProv), BorderLayout.CENTER);
-        prov.add(Ui.fila(Ui.boton("Nuevo proveedor", () -> formProveedor(null)),
-                Ui.boton("Editar", () -> { int id = Ui.idSeleccionado(tProv); if (id > 0) formProveedor(id); else Ui.info(this, "Seleccione un proveedor."); })), BorderLayout.SOUTH);
-
         JPanel cxp = new JPanel(new BorderLayout(6, 6));
         tCxp.getColumnModel().getColumn(0).setMaxWidth(50);
         Ui.alinearDerecha(tCxp, 6, 7);
@@ -58,56 +50,25 @@ public class ComprasPanel extends JPanel implements Actualizable {
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Compras", compras);
         tabs.addTab("Cuentas por pagar", cxp);
-        tabs.addTab("Proveedores", prov);
         add(tabs, BorderLayout.CENTER);
     }
 
     @Override public void alMostrar() {
         Ui.enSegundoPlano(this, () -> Db.sin(tx -> new Object[]{
                 tx.query("SELECT c.id_compra, c.fecha, p.nombre, al.nombre AS almacen, c.numero_documento, c.estado, IF(c.condicion_pago='CREDITO','Crédito',CONCAT('Contado ',COALESCE(c.metodo_pago,''))) AS pago, c.fecha_vencimiento, c.total FROM compras c JOIN proveedores p ON p.id_proveedor = c.id_proveedor JOIN almacenes al ON al.id_almacen = c.id_almacen ORDER BY c.id_compra DESC LIMIT 300"),
-                tx.query("SELECT id_proveedor, nombre, rtn, contacto, telefono, dias_credito, IF(activo=1,'Sí','No') AS act FROM proveedores ORDER BY nombre"),
                 tx.query("SELECT x.id_cxp, p.nombre, c.numero_documento, x.fecha_emision, x.fecha_vencimiento, "
                         + "DATEDIFF(CURRENT_DATE, x.fecha_vencimiento) AS dias_vencida, x.monto, x.saldo, x.estado "
                         + "FROM cuentas_por_pagar x JOIN proveedores p ON p.id_proveedor = x.id_proveedor JOIN compras c ON c.id_compra = x.id_compra "
                         + "ORDER BY x.estado, x.fecha_vencimiento LIMIT 500")}),
             r -> {
                 @SuppressWarnings("unchecked") var a = (List<Map<String, Object>>) r[0];
-                @SuppressWarnings("unchecked") var b = (List<Map<String, Object>>) r[1];
                 Ui.llenar(mCompras, a, "id_compra", "fecha", "nombre", "almacen", "numero_documento", "estado", "pago", "fecha_vencimiento", "total");
-                Ui.llenar(mProv, b, "id_proveedor", "nombre", "rtn", "contacto", "telefono", "dias_credito", "act");
-                @SuppressWarnings("unchecked") var c = (List<Map<String, Object>>) r[2];
+                @SuppressWarnings("unchecked") var c = (List<Map<String, Object>>) r[1];
                 cxpFilas = c;
                 repintarCxp();
             });
     }
 
-    private void formProveedor(Integer id) {
-        Map<String, Object> p = id == null ? null : Db.uno("SELECT * FROM proveedores WHERE id_proveedor = ?", id);
-        JTextField nombre = new JTextField(p == null ? "" : Db.str(p.get("nombre")), 24), rtn = new JTextField(p == null ? "" : Db.str(p.get("rtn")), 14),
-                contacto = new JTextField(p == null ? "" : Db.str(p.get("contacto")), 18), tel = new JTextField(p == null ? "" : Db.str(p.get("telefono")), 14),
-                email = new JTextField(p == null ? "" : Db.str(p.get("email")), 22), dir = new JTextField(p == null ? "" : Db.str(p.get("direccion")), 24);
-        JCheckBox activo = new JCheckBox("Activo", p == null || Db.ent(p.get("activo")) == 1);
-        JTextField dias = new JTextField(p == null ? "0" : Db.str(p.get("dias_credito")), 6);
-        Campos.Formulario f = new Campos.Formulario();
-        f.agregar("Nombre:", nombre).agregar("RTN (14 dígitos):", rtn).agregar("Contacto:", contacto).agregar("Teléfono:", tel)
-         .agregar("Correo:", email).agregar("Dirección:", dir).agregar("Días de crédito:", dias)
-         .nota("Si compra a crédito, el vencimiento se calcula con estos días (0 = contado).").agregar("", activo);
-        Campos.dialogo(this, id == null ? "Nuevo proveedor" : "Editar proveedor", f, () -> {
-            if (nombre.getText().isBlank()) throw new IllegalArgumentException("Escriba el nombre.");
-            String r = rtn.getText().trim();
-            if (!r.isEmpty() && !r.matches("\\d{14}")) throw new IllegalArgumentException("El RTN debe tener 14 dígitos.");
-            if (!dias.getText().trim().matches("\\d{1,3}")) throw new IllegalArgumentException("Los días de crédito deben ser un número (0 a 999).");
-            int dc = Integer.parseInt(dias.getText().trim());
-            Object[] v = {nombre.getText().trim(), r.isEmpty() ? null : r, nv(contacto), nv(tel), nv(email), nv(dir), activo.isSelected() ? 1 : 0, dc};
-            if (id == null) Db.insert("INSERT INTO proveedores (nombre, rtn, contacto, telefono, email, direccion, activo, dias_credito) VALUES (?,?,?,?,?,?,?,?)", v);
-            else Db.exec("UPDATE proveedores SET nombre=?, rtn=?, contacto=?, telefono=?, email=?, direccion=?, activo=?, dias_credito=? WHERE id_proveedor=?",
-                    v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], id);
-            return true;
-        });
-        alMostrar();
-    }
-
-    private static String nv(JTextField t) { return t.getText().isBlank() ? null : t.getText().trim(); }
 
     // ------------------------------------------------------------ compras
     private record Linea(int idInsumo, String nombre, String base, BigDecimal cantidadBase, BigDecimal total, Integer idProducto, BigDecimal precioVentaNuevo) {
@@ -293,7 +254,7 @@ public class ComprasPanel extends JPanel implements Actualizable {
         int id = Ui.idSeleccionado(tCompras);
         if (id < 0) { Ui.info(this, "Seleccione una compra."); return; }
         if (!Ui.confirmar(this, "¿Recibir la compra #" + id + " y sumarla al inventario?")) return;
-        Ui.seguro(this, () -> {
+        Runnable recibirYa = () -> Ui.seguro(this, () -> {
             Db.sin(tx -> {
                 Object alm = tx.scalar("SELECT id_almacen FROM compras WHERE id_compra = ?", id);
                 Almacenes.usar(tx, alm == null ? null : Db.ent(alm));
@@ -303,6 +264,15 @@ public class ComprasPanel extends JPanel implements Actualizable {
             Bitacora.registrar("RECIBIR", "compra", id, null);
             alMostrar();
         });
+        // compra a crédito: el proveedor puede tener un límite de lo que se le puede deber
+        Map<String, Object> c = Db.uno("SELECT c.condicion_pago, c.total, p.nombre, p.limite_credito, "
+                + "COALESCE((SELECT SUM(x.saldo) FROM cuentas_por_pagar x WHERE x.id_proveedor = p.id_proveedor AND x.estado = 'PENDIENTE'), 0) AS saldo "
+                + "FROM compras c JOIN proveedores p ON p.id_proveedor = c.id_proveedor WHERE c.id_compra = ?", id);
+        if (c != null && "CREDITO".equals(Db.str(c.get("condicion_pago"))) && Db.dec(c.get("limite_credito")).signum() > 0
+                && Db.dec(c.get("saldo")).add(Db.dec(c.get("total"))).compareTo(Db.dec(c.get("limite_credito"))) > 0)
+            Autorizacion.ejecutar(this, "credito.exceder", "recibir una compra a crédito que pasa el límite del proveedor «" + Db.str(c.get("nombre")) + "» ("
+                    + Ui.lempiras(Db.dec(c.get("limite_credito"))) + "; ya se le debe " + Ui.lempiras(Db.dec(c.get("saldo"))) + ")", recibirYa);
+        else recibirYa.run();
     }
 
     private void anularBorrador() {

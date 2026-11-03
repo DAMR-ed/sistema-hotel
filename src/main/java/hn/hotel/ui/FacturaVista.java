@@ -38,7 +38,11 @@ public final class FacturaVista {
         h.append("Fecha de emisión: ").append(Ui.texto(Ui.fechaHora(f.get("fecha_emision")))).append("<br>");
         h.append("Cliente: <b>").append(esc(f.get("cliente_nombre"))).append("</b><br>");
         h.append("RTN cliente: ").append(f.get("cliente_rtn") == null ? "C/F" : esc(f.get("cliente_rtn"))).append("<br>");
-        if (f.get("constancia_exoneracion") != null) h.append("Constancia de exoneración: ").append(esc(f.get("constancia_exoneracion"))).append("<br>");
+        if (f.get("constancia_exoneracion") != null) {
+            h.append("Orden de compra exenta N.º: ").append(f.get("orden_compra_exenta") == null ? "-" : esc(f.get("orden_compra_exenta"))).append("<br>");
+            h.append("Constancia de registro exonerado N.º: ").append(esc(f.get("constancia_exoneracion"))).append("<br>");
+            h.append("Registro SAG N.º: ").append(f.get("registro_sag") == null ? "-" : esc(f.get("registro_sag"))).append("<br>");
+        }
         h.append("Condición de pago: <b>").append(Db.str(f.get("condicion_pago")).equals("CREDITO") ? "CRÉDITO" : "CONTADO").append("</b>");
         if (f.get("fecha_vencimiento") != null) h.append("  (vence ").append(Ui.texto(Ui.fecha(f.get("fecha_vencimiento")))).append(")");
         h.append("<br><br><table width='100%' border='0' cellspacing='0' cellpadding='2'>");

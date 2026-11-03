@@ -75,15 +75,37 @@ public final class FacturarDialog {
         JTextField nombre = new JTextField(inicial.nombre(), 24), rtn = new JTextField(inicial.rtn() == null ? "" : inicial.rtn(), 14);
         Integer[] idHuesped = {inicial.idHuesped()};
         JCheckBox chkDesc = new JCheckBox("Aplicar descuento de adulto mayor", true);
-        JTextField constancia = new JTextField(14);
+        JCheckBox chkExo = new JCheckBox("Venta exonerada de ISV (SAR)");
+        JTextField ordenExenta = new JTextField(16), constancia = new JTextField(16), registroSag = new JTextField(16);
+        for (JTextField t : new JTextField[]{ordenExenta, constancia, registroSag}) t.setEnabled(false);
+        chkExo.addActionListener(e -> {
+            for (JTextField t : new JTextField[]{ordenExenta, constancia, registroSag}) t.setEnabled(chkExo.isSelected());
+            if (chkExo.isSelected()) ordenExenta.requestFocusInWindow();
+        });
         DefaultTableModel mDet = Ui.modelo("Descripción", "Cant.", "P. unit.", "Desc.", "Neto", "Impuesto");
         JTable tDet = Ui.tabla(mDet);
         Ui.alinearDerecha(tDet, 1, 2, 3, 4);
         JLabel lblTotales = new JLabel();
         JRadioButton rContado = new JRadioButton("Contado", true), rCredito = new JRadioButton("Crédito");
         ButtonGroup bg = new ButtonGroup(); bg.add(rContado); bg.add(rCredito);
-        JComboBox<AccionesHotel.Opcion> credito = AccionesHotel.combo(
-                Db.query("SELECT id_cliente_credito, nombre FROM clientes_credito WHERE activo = 1 ORDER BY nombre"), "id_cliente_credito", "nombre", false);
+        java.util.Map<Integer, java.util.Map<String, Object>> fichas = new java.util.HashMap<>();
+        JComboBox<AccionesHotel.Opcion> cliente = new JComboBox<>();
+        JLabel infoCredito = new JLabel(" ");
+        Runnable cargarClientes = () -> {
+            int antes = cliente.getItemCount() == 0 ? 0 : AccionesHotel.idDe(cliente);
+            cliente.removeAllItems();
+            fichas.clear();
+            cliente.addItem(new AccionesHotel.Opcion(0, "(Consumidor final / cliente eventual)"));
+            for (var c : Db.query("SELECT c.id_cliente_credito, c.nombre, c.rtn, c.es_exento, c.exo_constancia, c.exo_registro_sag, c.limite_credito, "
+                    + "COALESCE((SELECT SUM(x.saldo) FROM cuentas_por_cobrar x WHERE x.id_cliente_credito = c.id_cliente_credito AND x.estado IN ('PENDIENTE','PARCIAL')),0) AS saldo "
+                    + "FROM clientes_credito c WHERE c.activo = 1 ORDER BY c.nombre")) {
+                int id = Db.ent(c.get("id_cliente_credito"));
+                fichas.put(id, c);
+                cliente.addItem(new AccionesHotel.Opcion(id, Db.str(c.get("nombre"))));
+            }
+            AccionesHotel.seleccionar(cliente, antes);
+        };
+        cargarClientes.run();
         String[] metodos = {"EFECTIVO", "TARJETA", "TRANSFERENCIA", "CHEQUE", "OTRO"};
         JComboBox<String> m1 = new JComboBox<>(metodos), m2 = new JComboBox<>(metodos);
         JTextField p1 = new JTextField(9), p2 = new JTextField("0", 9), ref1 = new JTextField(10), ref2 = new JTextField(10);
@@ -94,7 +116,7 @@ public final class FacturarDialog {
 
         Runnable recalcular = () -> {
             try {
-                Vista v = fuente.vista(idHuesped[0], chkDesc.isSelected(), !constancia.getText().isBlank());
+                Vista v = fuente.vista(idHuesped[0], chkDesc.isSelected(), chkExo.isSelected());
                 actual[0] = v;
                 mDet.setRowCount(0);
                 for (Detalle d : v.totales().detalles)
@@ -116,12 +138,43 @@ public final class FacturarDialog {
         p1.getDocument().addDocumentListener(simple(() -> actualizarCambio(lblCambio, p1, p2, actual[0].totales().total.subtract(actual[0].anticipo()))));
         p2.getDocument().addDocumentListener(simple(() -> actualizarCambio(lblCambio, p1, p2, actual[0].totales().total.subtract(actual[0].anticipo()))));
         chkDesc.addActionListener(e -> recalcular.run());
-        constancia.addActionListener(e -> recalcular.run());
-        constancia.addFocusListener(new java.awt.event.FocusAdapter() { @Override public void focusLost(java.awt.event.FocusEvent e) { recalcular.run(); } });
+        chkExo.addActionListener(e -> recalcular.run());
+        Runnable alElegirCliente = () -> {
+            int id = AccionesHotel.idDe(cliente);
+            var f = fichas.get(id);
+            if (f == null) { infoCredito.setText(" "); return; }
+            nombre.setText(Db.str(f.get("nombre")));
+            rtn.setText(f.get("rtn") == null ? "" : f.get("rtn").toString());
+            BigDecimal lim = Db.dec(f.get("limite_credito")), sal = Db.dec(f.get("saldo"));
+            infoCredito.setText("<html>Límite " + Ui.lempiras(lim) + " | Saldo " + Ui.lempiras(sal) + " | <b>Disponible " + Ui.lempiras(lim.subtract(sal)) + "</b></html>");
+            if (Db.ent(f.get("es_exento")) == 1) {
+                chkExo.setSelected(true);
+                for (JTextField t : new JTextField[]{ordenExenta, constancia, registroSag}) t.setEnabled(true);
+                constancia.setText(Db.str(f.get("exo_constancia")));
+                registroSag.setText(Db.str(f.get("exo_registro_sag")));
+            }
+            recalcular.run();
+        };
+        cliente.addActionListener(e -> alElegirCliente.run());
 
-        JPanel cliente = new Campos.Formulario().agregar("Nombre en la factura:", nombre).agregar("RTN o identidad (opcional):", rtn)
+        JButton nuevoCliente = Ui.boton("Nuevo cliente...", () -> {
+            if (ClienteForm.editar(padre, null)) {
+                cargarClientes.run();
+                Object ultimo = Db.scalar("SELECT MAX(id_cliente_credito) FROM clientes_credito");
+                if (ultimo != null) AccionesHotel.seleccionar(cliente, Db.ent(ultimo));
+            }
+        });
+        JPanel filaCliente = new JPanel(new BorderLayout(6, 0));
+        filaCliente.add(cliente, BorderLayout.CENTER);
+        filaCliente.add(nuevoCliente, BorderLayout.EAST);
+        JPanel datosCliente = new Campos.Formulario().agregar("Cliente registrado:", filaCliente).agregar("", infoCredito)
+                .agregar("Nombre en la factura:", nombre).agregar("RTN o identidad (opcional):", rtn)
                 .agregar("", RtnValidacion.panel(padre, rtn, nombre))
-                .agregar("Constancia de exoneración (si aplica):", constancia).agregar("", chkDesc);
+                .agregar("", chkExo)
+                .agregar("N.º correlativo de orden de compra exenta:", ordenExenta)
+                .agregar("N.º correlativo de constancia de registro exonerado:", constancia)
+                .agregar("N.º identificativo del registro de la SAG:", registroSag)
+                .agregar("", chkDesc);
         if (permiteElegirHuesped) {
             JButton b = Ui.boton("Asociar huésped (para descuento)", () -> {
                 int id = AccionesHotel.elegirHuesped(padre);
@@ -133,7 +186,7 @@ public final class FacturarDialog {
                     recalcular.run();
                 }
             });
-            cliente.add(b);
+            datosCliente.add(b);
         }
 
         JPanel pagoContado = new JPanel(new GridLayout(0, 1, 2, 2));
@@ -164,7 +217,7 @@ public final class FacturarDialog {
                     pp.setText(r.monto().toPlainString());
                     rr.setText(("AUT " + Db.str(r.autorizacion()) + " " + Db.str(r.tarjeta())).trim());
                     m.setEnabled(false); pp.setEnabled(false); rr.setEnabled(false); bt.setEnabled(false);
-                    chkDesc.setEnabled(false); constancia.setEnabled(false); rCredito.setEnabled(false);
+                    chkDesc.setEnabled(false); chkExo.setEnabled(false); rCredito.setEnabled(false);
                     BigDecimal falta = pagar.subtract(vacioCero(p1)).subtract(vacioCero(p2));
                     if (falta.signum() > 0 && po.isEnabled()) po.setText(falta.toPlainString());
                     Ui.info(padre, "Tarjeta aprobada. Autorización " + Db.str(r.autorizacion()) + (falta.signum() > 0 ? "\nFalta por cobrar: " + Ui.lempiras(falta) : ""));
@@ -173,8 +226,8 @@ public final class FacturarDialog {
             cobrarPinPad[fila] = refrescarBoton;
         }
         pagoContado.add(lblCambio);
-        JPanel pagoCredito = Ui.fila(new JLabel("Cliente de crédito:"), credito);
-        if (inicial.creditoSugerido() != null) { AccionesHotel.seleccionar(credito, inicial.creditoSugerido()); rCredito.setSelected(true); }
+        JPanel pagoCredito = Ui.fila(new JLabel("<html>Se carga al cliente registrado elegido arriba. El sistema revisa su límite de crédito y sus facturas vencidas.</html>"));
+        if (inicial.creditoSugerido() != null) { AccionesHotel.seleccionar(cliente, inicial.creditoSugerido()); rCredito.setSelected(true); alElegirCliente.run(); }
         JPanel pagos = new JPanel(new CardLayout());
         pagos.add(pagoContado, "C"); pagos.add(pagoCredito, "R");
         Runnable cambioCondicion = () -> ((CardLayout) pagos.getLayout()).show(pagos, rCredito.isSelected() ? "R" : "C");
@@ -184,7 +237,7 @@ public final class FacturarDialog {
 
         JPanel p = new JPanel(new BorderLayout(6, 6));
         JPanel norte = new JPanel(new BorderLayout());
-        norte.add(cliente, BorderLayout.CENTER);
+        norte.add(datosCliente, BorderLayout.CENTER);
         p.add(norte, BorderLayout.NORTH);
         JPanel centro = new JPanel(new BorderLayout(4, 4));
         JScrollPane sp = new JScrollPane(tDet);
@@ -209,10 +262,18 @@ public final class FacturarDialog {
                 if (a.signum() > 0) lista.add(new Pago((String) m1.getSelectedItem(), a, ref1.getText().isBlank() ? null : ref1.getText().trim()));
                 if (b.signum() > 0) lista.add(new Pago((String) m2.getSelectedItem(), b, ref2.getText().isBlank() ? null : ref2.getText().trim()));
             }
-            Opciones o = new Opciones(idHuesped[0], nombre.getText(), rtn.getText(), credit, credit ? AccionesHotel.idDe(credito) : null,
-                    lista, constancia.getText(), chkDesc.isSelected() && chkDesc.isEnabled());
-            if (credit && AccionesHotel.idDe(credito) == 0) throw new IllegalArgumentException("No hay clientes de crédito registrados (módulo Crédito y cobros).");
-            idFactura[0] = fuente.emitir(o);
+            int idCli = AccionesHotel.idDe(cliente);
+            if (credit && idCli == 0) throw new IllegalArgumentException("Para vender a crédito elija un cliente registrado (o créelo con «Nuevo cliente»).");
+            boolean exo = chkExo.isSelected();
+            Opciones o = new Opciones(idHuesped[0], nombre.getText(), rtn.getText(), credit, credit ? idCli : null,
+                    lista, exo ? constancia.getText() : null, chkDesc.isSelected() && chkDesc.isEnabled(),
+                    idCli == 0 ? null : idCli, exo ? ordenExenta.getText() : null, exo ? registroSag.getText() : null);
+            if (exo && !o.exonerado()) throw new IllegalArgumentException("Para exonerar el ISV escriba los tres datos del SAR.");
+            o.validarExoneracion();
+            String problema = credit ? FacturacionService.verificarCredito(idCli, actual[0].totales().total) : null;
+            if (problema != null) {
+                if (!Autorizacion.ejecutar(padre, "credito.exceder", "vender a crédito: " + problema, () -> idFactura[0] = fuente.emitir(o))) return false;
+            } else idFactura[0] = fuente.emitir(o);
             if (!vposIds.isEmpty()) VposService.vincularFactura(vposIds, idFactura[0]);
             return true;
         });
