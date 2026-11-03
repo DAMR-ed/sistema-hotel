@@ -57,6 +57,7 @@ public class InventarioPanel extends JPanel implements Actualizable {
                 Ui.boton("Editar", () -> { int id = Ui.idSeleccionado(tabla); if (id > 0) formulario(id); else aviso(); }),
                 Ui.boton("Ajustar existencia", this::ajustar),
                 Ui.boton("Kardex del insumo", this::kardex),
+                Ui.boton("Vender en el POS...", this::venderEnPos),
                 Ui.boton("Exportar (CSV)", () -> Exportar.csv(this, modelo, "inventario_" + java.time.LocalDate.now()))), BorderLayout.SOUTH);
 
         // ---- pestaña Movimientos
@@ -197,6 +198,33 @@ public class InventarioPanel extends JPanel implements Actualizable {
             return true;
         });
         alMostrar();
+    }
+
+    /** Publica el insumo (en unidades) como producto del POS, para que se venda tal cual y descuente su propio stock. */
+    private void venderEnPos() {
+        int id = Ui.idSeleccionado(tabla);
+        if (id <= 0) { aviso(); return; }
+        var cats = Db.query("SELECT id_categoria, nombre FROM categorias_menu WHERE activa = 1 ORDER BY orden, nombre");
+        if (cats.isEmpty()) { Ui.info(this, "Primero cree una categoría en «Menú y recetas»."); return; }
+        JComboBox<AccionesHotel.Opcion> cat = AccionesHotel.combo(cats, "id_categoria", "nombre", false);
+        JTextField precio = new JTextField(10), barras = new JTextField(16);
+        JComboBox<AccionesHotel.Opcion> trat = new JComboBox<>();
+        java.util.Map<Integer, java.math.BigDecimal> tasaDe = new java.util.HashMap<>();
+        for (var t : Db.query("SELECT id_tasa, nombre, tasa FROM tasas_isv WHERE activa = 1 ORDER BY tasa")) {
+            trat.addItem(new AccionesHotel.Opcion(Db.ent(t.get("id_tasa")), Db.str(t.get("nombre"))));
+            tasaDe.put(Db.ent(t.get("id_tasa")), Db.dec(t.get("tasa")));
+        }
+        for (int k = 0; k < trat.getItemCount(); k++) if (tasaDe.get(trat.getItemAt(k).id()).compareTo(java.math.BigDecimal.valueOf(15)) == 0) trat.setSelectedIndex(k);
+        Campos.Formulario f = new Campos.Formulario().agregar("Categoría del menú:", cat).agregar("Precio de venta (L, SIN ISV):", precio)
+                .agregar("Impuesto (ISV):", trat).agregar("Código de barras (opcional):", barras)
+                .nota("Solo para insumos en UNIDADES (botella, lata, paquete). Cada venta descuenta 1 unidad de este inventario.");
+        Campos.dialogo(this, "Vender en el POS", f, () -> {
+            if (trat.getSelectedItem() == null) throw new IllegalArgumentException("No hay tasas de ISV configuradas.");
+            hn.hotel.service.ReventaService.venderEnPos(id, AccionesHotel.idDe(cat), Ui.leerDinero(precio.getText(), "precio"),
+                    tasaDe.get(AccionesHotel.idDe(trat)), barras.getText());
+            Ui.info(this, "Listo: el producto ya aparece en el POS.");
+            return true;
+        });
     }
 
     private void ajustar() {

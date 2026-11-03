@@ -130,12 +130,18 @@ public class MenuPanel extends JPanel implements Actualizable {
         JTextField nombre = new JTextField(p == null ? "" : Db.str(p.get("nombre")), 22);
         JTextField precio = new JTextField(p == null ? "" : Db.dec(p.get("precio")).toPlainString(), 10);
         JTextField desc = new JTextField(p == null ? "" : Db.str(p.get("descripcion")), 24);
+        boolean tieneReceta = id != null && Db.scalar("SELECT 1 FROM receta_detalle WHERE id_producto = ? LIMIT 1", id) != null;
+        JCheckBox reventa = new JCheckBox("Producto de reventa: controlar su inventario (bebidas, snacks, tienda)");
+        reventa.setEnabled(!tieneReceta);
+        if (tieneReceta) reventa.setText("Ya tiene receta / inventario (edítela abajo en «Receta»)");
+        JTextField costoCompra = new JTextField("0.00", 10);
         JTextField barras = new JTextField(p == null || p.get("codigo_barras") == null ? "" : Db.str(p.get("codigo_barras")), 18);
         JComboBox<AccionesHotel.Opcion> estacion = new JComboBox<>();
         estacion.addItem(new AccionesHotel.Opcion(0, "La de su categoría"));
         for (Map<String, Object> e : Db.query("SELECT id_estacion, nombre FROM estaciones WHERE activa = 1 ORDER BY orden, nombre"))
             estacion.addItem(new AccionesHotel.Opcion(Db.ent(e.get("id_estacion")), Db.str(e.get("nombre"))));
         estacion.addItem(new AccionesHotel.Opcion(-1, "Ninguna (se sirve directo, sin comanda)"));
+        reventa.addActionListener(ev -> { if (reventa.isSelected()) estacion.setSelectedIndex(estacion.getItemCount() - 1); });
         byte[][] foto = {p == null ? null : Fotos.bytes(p.get("foto"))};
         JLabel vista = new JLabel();
         Runnable pintarFoto = () -> {
@@ -165,7 +171,7 @@ public class MenuPanel extends JPanel implements Actualizable {
         }
         Campos.Formulario f = new Campos.Formulario();
         f.agregar("Categoría:", cat).agregar("Nombre:", nombre).agregar("Precio de venta (L, SIN ISV):", precio)
-         .agregar("Descripción:", desc).agregar("Código de barras (opcional):", barras).agregar("Foto:", panelFoto).agregar("Envía la comanda a:", estacion).agregar("Impuesto (ISV):", trat).agregar("", activo)
+         .agregar("Descripción:", desc).agregar("Código de barras (opcional):", barras).agregar("Foto:", panelFoto).agregar("Envía la comanda a:", estacion).agregar("Impuesto (ISV):", trat).agregar("", activo).agregar("", reventa).agregar("Costo de compra (L, sin ISV):", costoCompra)
          .nota("El ISV se suma al facturar según la tasa elegida (las tasas se configuran en Control > Impuestos). Si sus precios al público ya lo incluyen, divida entre 1.15 al registrarlos.");
         Campos.dialogo(this, id == null ? "Nuevo plato" : "Editar plato", f, () -> {
             if (nombre.getText().isBlank()) throw new IllegalArgumentException("Escriba el nombre.");
@@ -182,11 +188,13 @@ public class MenuPanel extends JPanel implements Actualizable {
                 long nid = Db.insert("INSERT INTO productos_menu (id_categoria, nombre, descripcion, precio, tratamiento_fiscal, tasa_isv, area_preparacion, id_estacion, foto, activo) VALUES (?,?,?,?,?,?,?,?,?,?)",
                         AccionesHotel.idDe(cat), nombre.getText().trim(), d, pr, fiscal, tasa, area, idEst, foto[0], activo.isSelected() ? 1 : 0);
                 guardarBarras(nid, barras.getText());
+                if (reventa.isSelected()) hn.hotel.service.ReventaService.controlarInventario(nid, nombre.getText().trim(), Ui.leerDinero(costoCompra.getText(), "costo"));
                 Bitacora.registrar("CREAR", "producto", nid, nombre.getText().trim());
             } else {
                 Db.exec("UPDATE productos_menu SET id_categoria=?, nombre=?, descripcion=?, precio=?, tratamiento_fiscal=?, tasa_isv=?, area_preparacion=?, id_estacion=?, foto=?, activo=? WHERE id_producto=?",
                         AccionesHotel.idDe(cat), nombre.getText().trim(), d, pr, fiscal, tasa, area, idEst, foto[0], activo.isSelected() ? 1 : 0, id);
                 guardarBarras(id, barras.getText());
+                if (reventa.isSelected() && reventa.isEnabled()) hn.hotel.service.ReventaService.controlarInventario(id, nombre.getText().trim(), Ui.leerDinero(costoCompra.getText(), "costo"));
                 Bitacora.registrar("EDITAR", "producto", id, nombre.getText().trim() + " L" + pr);
             }
             return true;
