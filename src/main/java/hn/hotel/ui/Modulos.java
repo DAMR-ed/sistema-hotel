@@ -30,6 +30,7 @@ public final class Modulos {
                 new Modulo("inventario", "Inventario", "INVENTARIO", InventarioPanel::new),
                 new Modulo("manufactura", "Manufactura (recetas)", "INVENTARIO", ManufacturaPanel::new),
                 new Modulo("compras", "Compras y proveedores", "INVENTARIO", ComprasPanel::new),
+                new Modulo("almacenes", "Almacenes y puntos de venta", "INVENTARIO", AlmacenesPanel::new),
 
                 new Modulo("facturacion", "Facturación", "FACTURACIÓN", FacturacionPanel::new),
                 new Modulo("credito", "Crédito y cobros", "FACTURACIÓN", CreditoPanel::new),

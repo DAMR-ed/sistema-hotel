@@ -2013,3 +2013,127 @@ CREATE TABLE IF NOT EXISTS permisos_sin_clave (
 ) ENGINE=InnoDB;
 
 SELECT 'OK' AS resultado;
+
+-- ===== 18_almacenes =====
+-- =====================================================================
+-- 18_almacenes.sql  -  Varios almacenes, puntos de venta y traspasos
+-- Ejecutar UNA vez, con root, después de 17.
+--   * insumos.stock_actual sigue siendo la existencia TOTAL (suma de todos los almacenes).
+--   * La existencia por almacén vive en la tabla "existencias" y la mantiene un trigger.
+--   * Todo lo que ya existe queda en el "Almacén principal".
+-- =====================================================================
+
+CREATE TABLE IF NOT EXISTS almacenes (
+  id_almacen   INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  nombre       VARCHAR(60)  NOT NULL,
+  descripcion  VARCHAR(120) NULL,
+  es_principal TINYINT(1)   NOT NULL DEFAULT 0,
+  activo       TINYINT(1)   NOT NULL DEFAULT 1,
+  PRIMARY KEY (id_almacen),
+  UNIQUE KEY uk_almacen_nombre (nombre)
+) ENGINE=InnoDB;
+
+INSERT INTO almacenes (id_almacen, nombre, descripcion, es_principal) VALUES (1, 'Almacén principal', 'Almacén por defecto', 1);
+
+CREATE TABLE IF NOT EXISTS existencias (
+  id_almacen INT UNSIGNED  NOT NULL,
+  id_insumo  INT UNSIGNED  NOT NULL,
+  stock      DECIMAL(14,3) NOT NULL DEFAULT 0,
+  PRIMARY KEY (id_almacen, id_insumo),
+  KEY idx_exist_insumo (id_insumo),
+  CONSTRAINT fk_exist_almacen FOREIGN KEY (id_almacen) REFERENCES almacenes (id_almacen),
+  CONSTRAINT fk_exist_insumo  FOREIGN KEY (id_insumo)  REFERENCES insumos (id_insumo)
+) ENGINE=InnoDB;
+
+INSERT INTO existencias (id_almacen, id_insumo, stock) SELECT 1, id_insumo, stock_actual FROM insumos;
+
+ALTER TABLE movimientos_inventario
+  MODIFY tipo ENUM('COMPRA','SALIDA_VENTA','DEVOLUCION','AJUSTE','MERMA','INVENTARIO_INICIAL','PRODUCCION_ENTRADA','PRODUCCION_SALIDA','AUTOCONSUMO','TRASPASO_SALIDA','TRASPASO_ENTRADA') NOT NULL,
+  ADD COLUMN id_almacen INT UNSIGNED NULL,
+  ADD KEY idx_mov_almacen (id_almacen),
+  ADD CONSTRAINT fk_mov_almacen FOREIGN KEY (id_almacen) REFERENCES almacenes (id_almacen);
+
+UPDATE movimientos_inventario SET id_almacen = 1 WHERE id_almacen IS NULL;
+
+-- Código del insumo (para la carga masiva desde Excel).
+ALTER TABLE insumos
+  ADD COLUMN codigo VARCHAR(30) NULL,
+  ADD UNIQUE KEY uk_insumo_codigo (codigo);
+
+CREATE TABLE IF NOT EXISTS puntos_venta (
+  id_punto   INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  nombre     VARCHAR(60)  NOT NULL,
+  tipo       ENUM('RESTAURANTE','TIENDA','BAR','OTRO') NOT NULL DEFAULT 'RESTAURANTE',
+  id_almacen INT UNSIGNED NOT NULL,
+  activo     TINYINT(1)   NOT NULL DEFAULT 1,
+  PRIMARY KEY (id_punto),
+  UNIQUE KEY uk_punto_nombre (nombre),
+  CONSTRAINT fk_punto_almacen FOREIGN KEY (id_almacen) REFERENCES almacenes (id_almacen)
+) ENGINE=InnoDB;
+
+INSERT INTO puntos_venta (nombre, tipo, id_almacen) VALUES ('Restaurante', 'RESTAURANTE', 1), ('Tienda', 'TIENDA', 1);
+
+ALTER TABLE comandas
+  ADD COLUMN id_punto_venta INT UNSIGNED NULL,
+  ADD CONSTRAINT fk_comanda_punto FOREIGN KEY (id_punto_venta) REFERENCES puntos_venta (id_punto);
+
+ALTER TABLE compras
+  ADD COLUMN id_almacen INT UNSIGNED NOT NULL DEFAULT 1,
+  ADD CONSTRAINT fk_compra_almacen FOREIGN KEY (id_almacen) REFERENCES almacenes (id_almacen);
+
+DROP TRIGGER IF EXISTS trg_insumos_existencias;
+DROP TRIGGER IF EXISTS trg_mov_almacen;
+DROP PROCEDURE IF EXISTS sp_traspasar;
+DELIMITER $$
+
+-- Cada cambio en la existencia total se aplica al almacén indicado por @almacen_id (o al principal).
+CREATE TRIGGER trg_insumos_existencias AFTER UPDATE ON insumos FOR EACH ROW
+BEGIN
+  DECLARE v_alm INT UNSIGNED;
+  IF NEW.stock_actual <> OLD.stock_actual THEN
+    SET v_alm = COALESCE(@almacen_id, (SELECT id_almacen FROM almacenes WHERE es_principal = 1 LIMIT 1), 1);
+    INSERT INTO existencias (id_almacen, id_insumo, stock)
+    VALUES (v_alm, NEW.id_insumo, NEW.stock_actual - OLD.stock_actual)
+    ON DUPLICATE KEY UPDATE stock = stock + (NEW.stock_actual - OLD.stock_actual);
+  END IF;
+END$$
+
+CREATE TRIGGER trg_mov_almacen BEFORE INSERT ON movimientos_inventario FOR EACH ROW
+BEGIN
+  IF NEW.id_almacen IS NULL THEN
+    SET NEW.id_almacen = COALESCE(@almacen_id, (SELECT id_almacen FROM almacenes WHERE es_principal = 1 LIMIT 1), 1);
+  END IF;
+END$$
+
+-- Traspaso de un insumo entre almacenes (la existencia total no cambia).
+CREATE PROCEDURE sp_traspasar (IN p_insumo INT UNSIGNED, IN p_origen INT UNSIGNED, IN p_destino INT UNSIGNED,
+                               IN p_cant DECIMAL(14,3), IN p_usuario INT UNSIGNED, IN p_nota VARCHAR(150))
+BEGIN
+  DECLARE v_disp DECIMAL(14,3);
+  DECLARE v_cu DECIMAL(14,6);
+  DECLARE v_no VARCHAR(60);
+  DECLARE v_nd VARCHAR(60);
+  IF p_origen = p_destino THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'El almacén de origen y el de destino son el mismo';
+  END IF;
+  IF p_cant IS NULL OR p_cant <= 0 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'La cantidad debe ser mayor que cero';
+  END IF;
+  SET v_disp = NULL;
+  SELECT stock INTO v_disp FROM existencias WHERE id_almacen = p_origen AND id_insumo = p_insumo FOR UPDATE;
+  IF COALESCE(v_disp, 0) < p_cant THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'No hay suficiente existencia en el almacén de origen';
+  END IF;
+  SELECT costo_promedio INTO v_cu FROM insumos WHERE id_insumo = p_insumo;
+  SELECT nombre INTO v_no FROM almacenes WHERE id_almacen = p_origen;
+  SELECT nombre INTO v_nd FROM almacenes WHERE id_almacen = p_destino;
+  UPDATE existencias SET stock = stock - p_cant WHERE id_almacen = p_origen AND id_insumo = p_insumo;
+  INSERT INTO existencias (id_almacen, id_insumo, stock) VALUES (p_destino, p_insumo, p_cant)
+    ON DUPLICATE KEY UPDATE stock = stock + p_cant;
+  INSERT INTO movimientos_inventario (id_insumo, tipo, cantidad, costo_unitario, referencia, id_usuario, notas, id_almacen)
+  VALUES (p_insumo, 'TRASPASO_SALIDA', -p_cant, v_cu, CONCAT('Traspaso a ', v_nd), p_usuario, p_nota, p_origen),
+         (p_insumo, 'TRASPASO_ENTRADA', p_cant, v_cu, CONCAT('Traspaso desde ', v_no), p_usuario, p_nota, p_destino);
+END$$
+DELIMITER ;
+
+SELECT 'OK' AS resultado, (SELECT COUNT(*) FROM existencias) AS existencias, (SELECT COUNT(*) FROM puntos_venta) AS puntos_venta;

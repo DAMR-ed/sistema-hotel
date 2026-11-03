@@ -72,6 +72,8 @@ public final class Db {
     /** Guarda la conexión (servidor de la red) en hotel.properties y la usa de inmediato. */
     public static synchronized void guardarConexion(String host, String puerto, String user, String pass) throws IOException {
         Properties p = new Properties();
+        File actual = archivoConfig();
+        if (actual.exists()) try (InputStream is = new FileInputStream(actual)) { p.load(is); }   // conserva otras opciones (p. ej. punto de venta)
         p.setProperty("db.url", urlDe(host, puerto));
         p.setProperty("db.usuario", user);
         p.setProperty("db.clave", pass);

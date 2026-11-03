@@ -306,10 +306,11 @@ public class ManufacturaPanel extends JPanel implements Actualizable {
             public void changedUpdate(javax.swing.event.DocumentEvent e) { calc.run(); }
         });
         calc.run();
-        Campos.Formulario f = new Campos.Formulario().agregar("Lotes a producir:", lotes).agregar("", resumen).agregar("Nota (opcional):", notas);
+        JComboBox<AccionesHotel.Opcion> alm = AccionesHotel.combo(Db.query("SELECT id_almacen, nombre FROM almacenes WHERE activo = 1 ORDER BY es_principal DESC, nombre"), "id_almacen", "nombre", false);
+        Campos.Formulario f = new Campos.Formulario().agregar("Almacén:", alm).agregar("Lotes a producir:", lotes).agregar("", resumen).agregar("Nota (opcional):", notas);
         boolean ok = Campos.dialogo(this, "Producir " + p.get("nombre"), f, () -> {
             BigDecimal l = Ui.leerDinero(lotes.getText(), "lotes");
-            BigDecimal prod = ManufacturaService.producir(id, l, notas.getText());
+            BigDecimal prod = ManufacturaService.producir(id, l, notas.getText(), AccionesHotel.idDe(alm));
             Ui.info(this, "Listo: se produjeron " + prod.stripTrailingZeros().toPlainString() + " " + p.get("unidad_base") + " de " + p.get("nombre") + ".");
             return true;
         });

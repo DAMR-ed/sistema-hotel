@@ -23,8 +23,10 @@ public final class RestauranteService {
                 if (existente != null) return Db.lng(existente);
                 tx.exec("UPDATE mesas SET estado = 'OCUPADA' WHERE id_mesa = ?", idMesa);
             }
-            long id = tx.insert("INSERT INTO comandas (tipo, id_mesa, num_personas, id_usuario) VALUES (?,?,?,?)",
-                    tipo, idMesa, Math.max(1, personas), Sesion.idUsuario);
+            Integer pv = Almacenes.puntoLocal();
+            if (pv != null && tx.scalar("SELECT 1 FROM puntos_venta WHERE id_punto = ? AND activo = 1", pv) == null) pv = null;
+            long id = tx.insert("INSERT INTO comandas (tipo, id_mesa, num_personas, id_usuario, id_punto_venta) VALUES (?,?,?,?,?)",
+                    tipo, idMesa, Math.max(1, personas), Sesion.idUsuario, pv);
             Bitacora.registrar("ABRIR", "comanda", id, tipo);
             return id;
         });
@@ -152,6 +154,7 @@ public final class RestauranteService {
             }
             // lo que no pasa por ninguna estación (bebidas embotelladas, postres de vitrina...) se da por servido
             tx.exec("UPDATE comanda_detalle SET estado = 'SERVIDO', enviado_en = NOW() WHERE id_comanda = ? AND estado = 'PENDIENTE'", idComanda);
+            Almacenes.deComanda(tx, idComanda);
             tx.call("{CALL sp_descontar_inventario_comanda(?)}", idComanda);
             descontarOpciones(tx, idComanda);
             Bitacora.registrar("ENVIAR", "comanda", idComanda, total + " plato(s)");
@@ -230,6 +233,7 @@ public final class RestauranteService {
             if (!estado.equals("PENDIENTE") && !esSupervisor())
                 throw new IllegalArgumentException("El plato ya fue enviado a cocina. Un supervisor debe autorizar la anulación.");
             boolean devolver = estado.equals("PENDIENTE") || estado.equals("ENVIADO");
+            Almacenes.deDetalle(tx, idDetalle);
             tx.call("{CALL sp_anular_detalle_comanda(?,?,?)}", idDetalle, motivo, devolver ? 1 : 0);
             if (devolver) devolverOpciones(tx, idDetalle);
             if (det.get("id_ticket") != null)
@@ -246,6 +250,7 @@ public final class RestauranteService {
             exigirAbierta(tx, idComanda);
             if (tx.scalar("SELECT 1 FROM comanda_detalle WHERE id_comanda = ? AND estado <> 'ANULADO' LIMIT 1", idComanda) == null)
                 throw new IllegalArgumentException("La comanda no tiene platos.");
+            Almacenes.deComanda(tx, idComanda);
             tx.call("{CALL sp_descontar_inventario_comanda(?)}", idComanda);
             descontarOpciones(tx, idComanda);
             tx.exec("UPDATE comandas SET estado = 'CERRADA', cerrada_en = NOW(), propina = ? WHERE id_comanda = ?", propina, idComanda);
@@ -264,6 +269,7 @@ public final class RestauranteService {
                 throw new IllegalArgumentException("La cuenta no tiene platos.");
             if (tx.scalar("SELECT 1 FROM motivos_autoconsumo WHERE id_motivo = ? AND activo = 1", idMotivo) == null)
                 throw new IllegalArgumentException("Elija un motivo de autoconsumo válido.");
+            Almacenes.deComanda(tx, idComanda);
             tx.call("{CALL sp_descontar_inventario_comanda(?)}", idComanda);
             descontarOpciones(tx, idComanda);
             String ref = "Autoconsumo #" + idComanda;
@@ -290,6 +296,7 @@ public final class RestauranteService {
         Db.transaccion(tx -> {
             if (tx.scalar("SELECT 1 FROM comanda_cuentas WHERE id_comanda = ? AND id_factura IS NOT NULL LIMIT 1", idComanda) != null)
                 throw new IllegalArgumentException("Esta mesa ya tiene cuentas cobradas por separado; cobre el resto en caja.");
+            Almacenes.deComanda(tx, idComanda);
             descontarOpciones(tx, idComanda);
             tx.call("{CALL sp_cargar_comanda_a_habitacion(?,?,?)}", idComanda, idEstancia, Sesion.idUsuario);
             Bitacora.registrar("CARGO_HABITACION", "comanda", idComanda, "estancia " + idEstancia);
@@ -309,6 +316,7 @@ public final class RestauranteService {
             for (Map<String, Object> d : platos) {
                 String est = Db.str(d.get("estado"));
                 boolean devolver = est.equals("PENDIENTE") || est.equals("ENVIADO");
+                Almacenes.deDetalle(tx, Db.ent(d.get("id_detalle")));
                 tx.call("{CALL sp_anular_detalle_comanda(?,?,?)}", d.get("id_detalle"), motivo.trim(), devolver ? 1 : 0);
                 if (devolver) devolverOpciones(tx, Db.ent(d.get("id_detalle")));
             }

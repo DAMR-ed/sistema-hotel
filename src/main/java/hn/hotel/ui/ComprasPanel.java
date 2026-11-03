@@ -2,6 +2,7 @@ package hn.hotel.ui;
 
 import hn.hotel.app.Sesion;
 import hn.hotel.db.Db;
+import hn.hotel.service.Almacenes;
 import hn.hotel.service.Bitacora;
 
 import javax.swing.*;
@@ -17,7 +18,7 @@ import java.util.Map;
 
 /** Compras a proveedores (suben el inventario y el costo promedio) y catálogo de proveedores. */
 public class ComprasPanel extends JPanel implements Actualizable {
-    private final DefaultTableModel mCompras = Ui.modelo("Id", "Fecha", "Proveedor", "Documento", "Estado", "Pago", "Vence", "Total");
+    private final DefaultTableModel mCompras = Ui.modelo("Id", "Fecha", "Proveedor", "Almacén", "Documento", "Estado", "Pago", "Vence", "Total");
     private final JTable tCompras = Ui.tabla(mCompras);
     private final DefaultTableModel mProv = Ui.modelo("Id", "Proveedor", "RTN", "Contacto", "Teléfono", "Días crédito", "Activo");
     private final JTable tProv = Ui.tabla(mProv);
@@ -34,7 +35,7 @@ public class ComprasPanel extends JPanel implements Actualizable {
 
         JPanel compras = new JPanel(new BorderLayout(6, 6));
         tCompras.getColumnModel().getColumn(0).setMaxWidth(50);
-        Ui.alinearDerecha(tCompras, 7);
+        Ui.alinearDerecha(tCompras, 8);
         compras.add(new JScrollPane(tCompras), BorderLayout.CENTER);
         compras.add(Ui.fila(Ui.boton("Nueva compra", this::nuevaCompra), Ui.boton("Ver detalle", this::verDetalle),
                 Ui.boton("Recibir (borrador)", this::recibir), Ui.boton("Anular borrador", this::anularBorrador)), BorderLayout.SOUTH);
@@ -63,7 +64,7 @@ public class ComprasPanel extends JPanel implements Actualizable {
 
     @Override public void alMostrar() {
         Ui.enSegundoPlano(this, () -> Db.sin(tx -> new Object[]{
-                tx.query("SELECT c.id_compra, c.fecha, p.nombre, c.numero_documento, c.estado, IF(c.condicion_pago='CREDITO','Crédito',CONCAT('Contado ',COALESCE(c.metodo_pago,''))) AS pago, c.fecha_vencimiento, c.total FROM compras c JOIN proveedores p ON p.id_proveedor = c.id_proveedor ORDER BY c.id_compra DESC LIMIT 300"),
+                tx.query("SELECT c.id_compra, c.fecha, p.nombre, al.nombre AS almacen, c.numero_documento, c.estado, IF(c.condicion_pago='CREDITO','Crédito',CONCAT('Contado ',COALESCE(c.metodo_pago,''))) AS pago, c.fecha_vencimiento, c.total FROM compras c JOIN proveedores p ON p.id_proveedor = c.id_proveedor JOIN almacenes al ON al.id_almacen = c.id_almacen ORDER BY c.id_compra DESC LIMIT 300"),
                 tx.query("SELECT id_proveedor, nombre, rtn, contacto, telefono, dias_credito, IF(activo=1,'Sí','No') AS act FROM proveedores ORDER BY nombre"),
                 tx.query("SELECT x.id_cxp, p.nombre, c.numero_documento, x.fecha_emision, x.fecha_vencimiento, "
                         + "DATEDIFF(CURRENT_DATE, x.fecha_vencimiento) AS dias_vencida, x.monto, x.saldo, x.estado "
@@ -72,7 +73,7 @@ public class ComprasPanel extends JPanel implements Actualizable {
             r -> {
                 @SuppressWarnings("unchecked") var a = (List<Map<String, Object>>) r[0];
                 @SuppressWarnings("unchecked") var b = (List<Map<String, Object>>) r[1];
-                Ui.llenar(mCompras, a, "id_compra", "fecha", "nombre", "numero_documento", "estado", "pago", "fecha_vencimiento", "total");
+                Ui.llenar(mCompras, a, "id_compra", "fecha", "nombre", "almacen", "numero_documento", "estado", "pago", "fecha_vencimiento", "total");
                 Ui.llenar(mProv, b, "id_proveedor", "nombre", "rtn", "contacto", "telefono", "dias_credito", "act");
                 @SuppressWarnings("unchecked") var c = (List<Map<String, Object>>) r[2];
                 cxpFilas = c;
@@ -122,6 +123,7 @@ public class ComprasPanel extends JPanel implements Actualizable {
         JComboBox<AccionesHotel.Opcion> prov = AccionesHotel.combo(provs, "id_proveedor", "nombre", false);
         JSpinner fecha = Campos.fecha(LocalDate.now());
         JTextField doc = new JTextField(16);
+        JComboBox<AccionesHotel.Opcion> almacen = AccionesHotel.combo(Db.query("SELECT id_almacen, nombre FROM almacenes WHERE activo = 1 ORDER BY es_principal DESC, nombre"), "id_almacen", "nombre", false);
         JComboBox<String> condicion = new JComboBox<>(new String[]{"CONTADO", "CREDITO"});
         JComboBox<String> metodo = new JComboBox<>(new String[]{"EFECTIVO", "TARJETA", "TRANSFERENCIA", "CHEQUE"});
         JTextField refPago = new JTextField(16);
@@ -228,7 +230,7 @@ public class ComprasPanel extends JPanel implements Actualizable {
 
         JPanel p = new JPanel(new BorderLayout(6, 6));
         Campos.Formulario cab = new Campos.Formulario();
-        cab.agregar("Proveedor:", prov).agregar("Fecha de la factura:", fecha).agregar("N.º de factura del proveedor:", doc)
+        cab.agregar("Proveedor:", prov).agregar("Almacén destino:", almacen).agregar("Fecha de la factura:", fecha).agregar("N.º de factura del proveedor:", doc)
            .agregar("Condición de pago:", condicion).agregar("Método de pago:", metodo).agregar("Referencia (cheque, transf.):", refPago)
            .agregar("Vence el:", vence);
         p.add(cab, BorderLayout.NORTH);
@@ -246,10 +248,10 @@ public class ComprasPanel extends JPanel implements Actualizable {
             if (cred && Campos.valor(vence).isBefore(Campos.valor(fecha)))
                 throw new IllegalArgumentException("El vencimiento no puede ser antes de la fecha de la factura.");
             Db.transaccion(tx -> {
-                long idc = tx.insert("INSERT INTO compras (id_proveedor, fecha, numero_documento, id_usuario, condicion_pago, metodo_pago, referencia_pago, fecha_vencimiento) VALUES (?,?,?,?,?,?,?,?)",
+                long idc = tx.insert("INSERT INTO compras (id_proveedor, fecha, numero_documento, id_usuario, condicion_pago, metodo_pago, referencia_pago, fecha_vencimiento, id_almacen) VALUES (?,?,?,?,?,?,?,?,?)",
                         AccionesHotel.idDe(prov), Campos.valor(fecha), doc.getText().isBlank() ? null : doc.getText().trim(), Sesion.idUsuario,
                         cred ? "CREDITO" : "CONTADO", cred ? null : metodo.getSelectedItem(), cred || refPago.getText().isBlank() ? null : refPago.getText().trim(),
-                        cred ? Campos.valor(vence) : null);
+                        cred ? Campos.valor(vence) : null, AccionesHotel.idDe(almacen));
                 for (Linea l : lineas.values())
                     tx.exec("INSERT INTO compra_detalle (id_compra, id_insumo, cantidad, costo_unitario) VALUES (?,?,?,?)",
                             idc, l.idInsumo(), l.cantidadBase(), l.costoUnitario());
@@ -258,7 +260,7 @@ public class ComprasPanel extends JPanel implements Actualizable {
                     tx.exec("UPDATE productos_menu SET precio = ? WHERE id_producto = ?", l.precioVentaNuevo(), l.idProducto());
                     Bitacora.registrar("PRECIO", "producto", l.idProducto(), "de " + ant + " a " + l.precioVentaNuevo() + " (compra #" + idc + ")");
                 }
-                if (recibirYa.isSelected()) tx.call("{CALL sp_recibir_compra(?,?)}", idc, Sesion.idUsuario);
+                if (recibirYa.isSelected()) { Almacenes.usar(tx, AccionesHotel.idDe(almacen)); tx.call("{CALL sp_recibir_compra(?,?)}", idc, Sesion.idUsuario); }
                 Bitacora.registrar("CREAR", "compra", idc, (recibirYa.isSelected() ? "recibida" : "borrador") + (cred ? ", a crédito" : ", contado"));
                 return null;
             });
@@ -292,7 +294,12 @@ public class ComprasPanel extends JPanel implements Actualizable {
         if (id < 0) { Ui.info(this, "Seleccione una compra."); return; }
         if (!Ui.confirmar(this, "¿Recibir la compra #" + id + " y sumarla al inventario?")) return;
         Ui.seguro(this, () -> {
-            Db.sin(tx -> { tx.call("{CALL sp_recibir_compra(?,?)}", id, Sesion.idUsuario); return null; });
+            Db.sin(tx -> {
+                Object alm = tx.scalar("SELECT id_almacen FROM compras WHERE id_compra = ?", id);
+                Almacenes.usar(tx, alm == null ? null : Db.ent(alm));
+                tx.call("{CALL sp_recibir_compra(?,?)}", id, Sesion.idUsuario);
+                return null;
+            });
             Bitacora.registrar("RECIBIR", "compra", id, null);
             alMostrar();
         });

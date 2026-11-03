@@ -15,13 +15,13 @@ public final class Sesion {
 
     /** Módulos que ve cada rol. ADMIN ve todo. */
     private static final Map<String, Set<String>> PERMISOS = Map.of(
-            "SUPERVISOR", Set.of("inicio", "autoconsumo", "pos_retail", "cortes", "pos_rest", "cocina", "restaurante", "menu", "estaciones", "inventario", "manufactura", "compras", "facturacion", "credito", "vpos", "alarmas", "reportes"),
+            "SUPERVISOR", Set.of("inicio", "autoconsumo", "pos_retail", "cortes", "pos_rest", "cocina", "restaurante", "menu", "estaciones", "inventario", "manufactura", "compras", "almacenes", "facturacion", "credito", "vpos", "alarmas", "reportes"),
             "RECEPCION", Set.of("inicio", "pos_retail", "cortes", "plano", "reservas", "estancias", "huespedes", "facturacion", "credito", "alarmas", "reportes", "pos_rest"),
             "AMA_LLAVES", Set.of("inicio", "plano", "alarmas"),
             "CAJERO", Set.of("inicio", "pos_retail", "cortes", "facturacion", "credito", "vpos", "pos_rest", "reportes", "alarmas"),
             "MESERO", Set.of("inicio", "pos_rest"),
             "COCINA", Set.of("inicio", "cocina"),
-            "BODEGA", Set.of("inicio", "autoconsumo", "inventario", "manufactura", "compras", "alarmas"),
+            "BODEGA", Set.of("inicio", "autoconsumo", "inventario", "manufactura", "compras", "almacenes", "alarmas"),
             "CONTADOR", Set.of("inicio", "autoconsumo", "cortes", "compras", "facturacion", "credito", "vpos", "reportes", "fiscal", "impuestos")
     );
 
@@ -62,6 +62,8 @@ public final class Sesion {
         ACCIONES.put("pos.cambiar_precio", "Cambiar el precio de un plato");
         ACCIONES.put("pos.cambiar_cantidad", "Cambiar la cantidad de un plato (antes de enviarlo)");
         ACCIONES.put("pos.borrar_linea", "Quitar platos que aún no se envían a cocina");
+        ACCIONES.put("inventario.carga_masiva", "Cargar o ajustar el inventario en masa (Excel)");
+        ACCIONES.put("pos.traspasos", "Hacer traspasos entre almacenes");
         ACCIONES.put("compras.pagar", "Pagar a proveedores (cuentas por pagar)");
     }
 
@@ -71,7 +73,8 @@ public final class Sesion {
             "RECEPCION", Set.of("pos.cobrar", "pos.precuenta", "pos.dividir", "pos.cambiar_mesa", "pos.cargar_habitacion", "pos.ver_todas", "pos.cambiar_lista", "pos.corte_x", "pos.borrar_linea", "pos.cambiar_cantidad"),
             "CAJERO", Set.of("pos.cobrar", "pos.precuenta", "pos.dividir", "pos.cambiar_mesa", "pos.cargar_habitacion", "pos.ver_todas", "pos.cambiar_lista", "pos.corte_x", "pos.borrar_linea", "pos.cambiar_cantidad"),
             "MESERO", Set.of("pos.precuenta", "pos.dividir", "pos.cambiar_mesa", "pos.borrar_linea", "pos.cambiar_cantidad"),
-            "CONTADOR", Set.of("compras.pagar")
+            "CONTADOR", Set.of("compras.pagar"),
+            "BODEGA", Set.of("pos.traspasos", "inventario.carga_masiva")
     );
 
     /** Permisos de fábrica de un rol (módulos y acciones). */

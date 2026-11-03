@@ -20,9 +20,13 @@ public final class ManufacturaService {
     }
 
     /** Descuenta los ingredientes y suma lo producido al inventario. Devuelve la cantidad producida (unidad base). */
-    public static BigDecimal producir(int idPreparacion, BigDecimal lotes, String notas) {
+    public static BigDecimal producir(int idPreparacion, BigDecimal lotes, String notas) { return producir(idPreparacion, lotes, notas, null); }
+
+    /** Igual que arriba, descontando y sumando en el almacén indicado (null = principal). */
+    public static BigDecimal producir(int idPreparacion, BigDecimal lotes, String notas, Integer idAlmacen) {
         if (lotes == null || lotes.signum() <= 0) throw new IllegalArgumentException("Indique cuántos lotes va a producir.");
         return Db.transaccion(tx -> {
+            Almacenes.usar(tx, idAlmacen);
             Map<String, Object> p = tx.uno("SELECT p.id_insumo, p.rendimiento, p.activa, i.nombre, i.stock_actual, i.costo_promedio FROM preparaciones p "
                     + "JOIN insumos i ON i.id_insumo = p.id_insumo WHERE p.id_preparacion = ? FOR UPDATE", idPreparacion);
             if (p == null || Db.ent(p.get("activa")) == 0) throw new IllegalArgumentException("La preparación no existe o está inactiva.");
