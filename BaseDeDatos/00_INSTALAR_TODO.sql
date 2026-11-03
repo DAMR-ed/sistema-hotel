@@ -1904,3 +1904,97 @@ CREATE TABLE IF NOT EXISTS autoconsumos (
 
 SELECT 'OK' AS resultado, (SELECT COUNT(*) FROM motivos_autoconsumo) AS motivos;
 
+
+-- ===== 16_compras_cxp =====
+-- =====================================================================
+-- 16_compras_cxp.sql  -  Compras: condición de pago, método, vencimiento y Cuentas por Pagar
+-- Ejecutar UNA vez, con root, después de 15.
+-- =====================================================================
+
+ALTER TABLE proveedores
+  ADD COLUMN dias_credito SMALLINT UNSIGNED NOT NULL DEFAULT 0;
+
+ALTER TABLE compras
+  ADD COLUMN condicion_pago     ENUM('CONTADO','CREDITO') NOT NULL DEFAULT 'CONTADO',
+  ADD COLUMN metodo_pago        ENUM('EFECTIVO','TARJETA','TRANSFERENCIA','CHEQUE') NULL,
+  ADD COLUMN referencia_pago    VARCHAR(60) NULL,
+  ADD COLUMN fecha_vencimiento  DATE NULL;
+
+CREATE TABLE IF NOT EXISTS cuentas_por_pagar (
+  id_cxp            INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  id_compra         INT UNSIGNED  NOT NULL,
+  id_proveedor      INT UNSIGNED  NOT NULL,
+  fecha_emision     DATE          NOT NULL,
+  fecha_vencimiento DATE          NOT NULL,
+  monto             DECIMAL(14,2) NOT NULL,
+  saldo             DECIMAL(14,2) NOT NULL,
+  estado            ENUM('PENDIENTE','PAGADA') NOT NULL DEFAULT 'PENDIENTE',
+  PRIMARY KEY (id_cxp),
+  UNIQUE KEY uk_cxp_compra (id_compra),
+  KEY idx_cxp_estado_venc (estado, fecha_vencimiento),
+  CONSTRAINT fk_cxp_compra    FOREIGN KEY (id_compra)    REFERENCES compras (id_compra),
+  CONSTRAINT fk_cxp_proveedor FOREIGN KEY (id_proveedor) REFERENCES proveedores (id_proveedor)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS pagos_proveedor (
+  id_pago     INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+  id_cxp      INT UNSIGNED  NOT NULL,
+  fecha       DATE          NOT NULL,
+  monto       DECIMAL(14,2) NOT NULL,
+  metodo      ENUM('EFECTIVO','TARJETA','TRANSFERENCIA','CHEQUE') NOT NULL,
+  referencia  VARCHAR(60)   NULL,
+  id_usuario  INT UNSIGNED  NULL,
+  creado_en   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id_pago),
+  KEY idx_pagos_cxp (id_cxp),
+  CONSTRAINT ck_pago_monto CHECK (monto > 0),
+  CONSTRAINT fk_pago_cxp FOREIGN KEY (id_cxp) REFERENCES cuentas_por_pagar (id_cxp)
+) ENGINE=InnoDB;
+
+-- Al recibir una compra a crédito se crea su cuenta por pagar.
+DROP PROCEDURE IF EXISTS sp_recibir_compra;
+DELIMITER $$
+CREATE PROCEDURE sp_recibir_compra (IN p_id_compra INT UNSIGNED, IN p_id_usuario INT UNSIGNED)
+BEGIN
+  DECLARE v_estado VARCHAR(10);
+  DECLARE v_cond VARCHAR(10);
+  SET v_estado = NULL;
+  SELECT estado, condicion_pago INTO v_estado, v_cond FROM compras WHERE id_compra = p_id_compra FOR UPDATE;
+  IF v_estado IS NULL THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'La compra no existe';
+  END IF;
+  IF v_estado <> 'BORRADOR' THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Solo se pueden recibir compras en borrador';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM compra_detalle WHERE id_compra = p_id_compra) THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'La compra no tiene líneas';
+  END IF;
+
+  INSERT INTO movimientos_inventario
+        (id_insumo, tipo, cantidad, costo_unitario, referencia, id_compra, id_usuario)
+  SELECT d.id_insumo, 'COMPRA', d.cantidad, d.costo_unitario,
+         CONCAT('Compra #', p_id_compra), p_id_compra, p_id_usuario
+    FROM compra_detalle d WHERE d.id_compra = p_id_compra;
+
+  UPDATE insumos i
+    JOIN compra_detalle d ON d.id_insumo = i.id_insumo AND d.id_compra = p_id_compra
+     SET i.costo_promedio = (GREATEST(i.stock_actual, 0) * i.costo_promedio + d.cantidad * d.costo_unitario)
+                            / (GREATEST(i.stock_actual, 0) + d.cantidad);
+
+  UPDATE insumos i
+    JOIN compra_detalle d ON d.id_insumo = i.id_insumo AND d.id_compra = p_id_compra
+     SET i.stock_actual = i.stock_actual + d.cantidad;
+
+  UPDATE compras
+     SET estado = 'RECIBIDA',
+         total  = (SELECT ROUND(SUM(cantidad * costo_unitario), 2)
+                     FROM compra_detalle WHERE id_compra = p_id_compra)
+   WHERE id_compra = p_id_compra;
+
+  IF v_cond = 'CREDITO' THEN
+    INSERT INTO cuentas_por_pagar (id_compra, id_proveedor, fecha_emision, fecha_vencimiento, monto, saldo)
+    SELECT c.id_compra, c.id_proveedor, c.fecha, COALESCE(c.fecha_vencimiento, c.fecha), c.total, c.total
+      FROM compras c WHERE c.id_compra = p_id_compra;
+  END IF;
+END$$
+DELIMITER ;

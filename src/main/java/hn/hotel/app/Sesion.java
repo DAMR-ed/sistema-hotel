@@ -22,7 +22,7 @@ public final class Sesion {
             "MESERO", Set.of("inicio", "pos_rest"),
             "COCINA", Set.of("inicio", "cocina"),
             "BODEGA", Set.of("inicio", "autoconsumo", "inventario", "manufactura", "compras", "alarmas"),
-            "CONTADOR", Set.of("inicio", "autoconsumo", "cortes", "facturacion", "credito", "vpos", "reportes", "fiscal", "impuestos")
+            "CONTADOR", Set.of("inicio", "autoconsumo", "cortes", "compras", "facturacion", "credito", "vpos", "reportes", "fiscal", "impuestos")
     );
 
     /** Tipo de negocio (configuración «modulo_hotel» y «modulo_restaurante»): permite usar el sistema solo para restaurante o solo para hotel. */
@@ -58,6 +58,7 @@ public final class Sesion {
         ACCIONES.put("pos.autoconsumo", "Registrar autoconsumos (cuentas sin venta que descargan inventario)");
         ACCIONES.put("pos.corte_x", "Hacer corte X (cambio de turno)");
         ACCIONES.put("pos.corte_z", "Hacer corte Z (cierre del día)");
+        ACCIONES.put("compras.pagar", "Pagar a proveedores (cuentas por pagar)");
     }
 
     private static final Set<String> TODAS_POS = new java.util.LinkedHashSet<>(ACCIONES.keySet());
@@ -65,7 +66,8 @@ public final class Sesion {
             "SUPERVISOR", TODAS_POS,
             "RECEPCION", Set.of("pos.cobrar", "pos.precuenta", "pos.dividir", "pos.cambiar_mesa", "pos.cargar_habitacion", "pos.ver_todas", "pos.cambiar_lista", "pos.corte_x"),
             "CAJERO", Set.of("pos.cobrar", "pos.precuenta", "pos.dividir", "pos.cambiar_mesa", "pos.cargar_habitacion", "pos.ver_todas", "pos.cambiar_lista", "pos.corte_x"),
-            "MESERO", Set.of("pos.precuenta", "pos.dividir", "pos.cambiar_mesa")
+            "MESERO", Set.of("pos.precuenta", "pos.dividir", "pos.cambiar_mesa"),
+            "CONTADOR", Set.of("compras.pagar")
     );
 
     /** Permisos de fábrica de un rol (módulos y acciones). */
