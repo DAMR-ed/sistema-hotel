@@ -55,6 +55,40 @@ public class ReportesPanel extends JPanel implements Actualizable {
             "SELECT cliente AS `Cliente`, numero_factura AS `Factura`, fecha_emision AS `Emisión`, fecha_vencimiento AS `Vence`, monto AS `Monto`, saldo AS `Saldo`, dias_vencido AS `Días vencida` FROM v_cuentas_por_cobrar WHERE estado IN ('PENDIENTE','PARCIAL') ORDER BY fecha_vencimiento", false),
         new Rep("Facturas anuladas",
             "SELECT numero_factura AS `Factura`, fecha_emision AS `Emitida`, cliente_nombre AS `Cliente`, total AS `Total`, anulada_en AS `Anulada`, motivo_anulacion AS `Motivo` FROM facturas WHERE estado = 'ANULADA' AND DATE(fecha_emision) BETWEEN @d AND @h ORDER BY id_factura", false),
+        new Rep("Ventas por producto o servicio (facturado)",
+            "SELECT fd.descripcion AS `Producto / servicio`, fd.tipo AS `Tipo`, SUM(fd.cantidad) AS `Cantidad`, ROUND(SUM(fd.cantidad * fd.precio_unitario), 2) AS `Venta bruta`, "
+          + "ROUND(SUM(fd.descuento), 2) AS `Descuentos`, ROUND(SUM(fd.subtotal), 2) AS `Venta neta`, ROUND(SUM(fd.isv), 2) AS `ISV` FROM factura_detalle fd JOIN facturas f ON f.id_factura = fd.id_factura "
+          + "WHERE f.estado = 'EMITIDA' AND DATE(f.fecha_emision) BETWEEN @d AND @h GROUP BY fd.descripcion, fd.tipo ORDER BY SUM(fd.subtotal) DESC", false),
+        new Rep("Ventas por tipo (hospedaje, alimentos, bebidas, servicios)",
+            "SELECT fd.tipo AS `Tipo`, SUM(fd.cantidad) AS `Cantidad`, ROUND(SUM(fd.subtotal), 2) AS `Venta neta`, ROUND(SUM(fd.isv), 2) AS `ISV` FROM factura_detalle fd JOIN facturas f ON f.id_factura = fd.id_factura "
+          + "WHERE f.estado = 'EMITIDA' AND DATE(f.fecha_emision) BETWEEN @d AND @h GROUP BY fd.tipo ORDER BY SUM(fd.subtotal) DESC", false),
+        new Rep("Ventas por cajero o usuario",
+            "SELECT COALESCE(u.nombre, '-') AS `Usuario`, COUNT(*) AS `Facturas`, ROUND(SUM(f.total), 2) AS `Total`, ROUND(SUM(f.descuento_total), 2) AS `Descuentos` FROM facturas f "
+          + "LEFT JOIN usuarios u ON u.id_usuario = f.id_usuario WHERE f.estado = 'EMITIDA' AND DATE(f.fecha_emision) BETWEEN @d AND @h GROUP BY u.id_usuario, u.nombre ORDER BY SUM(f.total) DESC", false),
+        new Rep("Ventas por hora del día",
+            "SELECT HOUR(fecha_emision) AS `Hora`, COUNT(*) AS `Facturas`, ROUND(SUM(total), 2) AS `Total` FROM facturas WHERE estado = 'EMITIDA' AND DATE(fecha_emision) BETWEEN @d AND @h GROUP BY HOUR(fecha_emision) ORDER BY HOUR(fecha_emision)", false),
+        new Rep("Ventas por cliente",
+            "SELECT cliente_nombre AS `Cliente`, COALESCE(cliente_rtn, '') AS `RTN`, COUNT(*) AS `Facturas`, ROUND(SUM(total), 2) AS `Total` FROM facturas "
+          + "WHERE estado = 'EMITIDA' AND DATE(fecha_emision) BETWEEN @d AND @h GROUP BY cliente_nombre, cliente_rtn ORDER BY SUM(total) DESC", false),
+        new Rep("Descuentos aplicados en facturas",
+            "SELECT f.numero_factura AS `Factura`, f.fecha_emision AS `Fecha`, fd.descripcion AS `Detalle`, fd.cantidad AS `Cant.`, ROUND(fd.cantidad * fd.precio_unitario, 2) AS `Importe`, fd.descuento AS `Descuento`, "
+          + "COALESCE(u.username, '-') AS `Usuario` FROM factura_detalle fd JOIN facturas f ON f.id_factura = fd.id_factura LEFT JOIN usuarios u ON u.id_usuario = f.id_usuario "
+          + "WHERE f.estado = 'EMITIDA' AND fd.descuento > 0 AND DATE(f.fecha_emision) BETWEEN @d AND @h ORDER BY f.id_factura", false),
+        new Rep("Descuentos y cambios de precio en el POS (auditoría)",
+            "SELECT b.fecha AS `Fecha`, COALESCE(u.username, '-') AS `Usuario`, b.accion AS `Acción`, b.id_entidad AS `Id`, b.detalle AS `Detalle` FROM bitacora b LEFT JOIN usuarios u ON u.id_usuario = b.id_usuario "
+          + "WHERE b.accion IN ('AJUSTE_PLATO', 'PRECIO', 'AUTORIZACION') AND DATE(b.fecha) BETWEEN @d AND @h ORDER BY b.id_bitacora DESC", false),
+        new Rep("Compras detalladas por insumo",
+            "SELECT c.fecha AS `Fecha`, p.nombre AS `Proveedor`, c.numero_documento AS `Factura`, i.nombre AS `Insumo`, d.cantidad AS `Cantidad`, i.unidad_base AS `Unidad`, d.costo_unitario AS `Costo unit.`, "
+          + "ROUND(d.cantidad * d.costo_unitario, 2) AS `Importe`, c.condicion_pago AS `Pago` FROM compras c JOIN compra_detalle d ON d.id_compra = c.id_compra JOIN insumos i ON i.id_insumo = d.id_insumo "
+          + "JOIN proveedores p ON p.id_proveedor = c.id_proveedor WHERE c.estado = 'RECIBIDA' AND c.fecha BETWEEN @d AND @h ORDER BY c.fecha, c.id_compra", false),
+        new Rep("Cuentas por pagar a proveedores (hoy)",
+            "SELECT p.nombre AS `Proveedor`, c.numero_documento AS `Factura`, x.fecha_emision AS `Emisión`, x.fecha_vencimiento AS `Vence`, x.monto AS `Monto`, x.saldo AS `Saldo`, "
+          + "GREATEST(0, DATEDIFF(CURRENT_DATE, x.fecha_vencimiento)) AS `Días vencida` FROM cuentas_por_pagar x JOIN proveedores p ON p.id_proveedor = x.id_proveedor JOIN compras c ON c.id_compra = x.id_compra "
+          + "WHERE x.estado = 'PENDIENTE' ORDER BY x.fecha_vencimiento", false),
+        new Rep("Pagos realizados a proveedores",
+            "SELECT g.fecha AS `Fecha`, p.nombre AS `Proveedor`, c.numero_documento AS `Factura`, g.monto AS `Monto`, g.metodo AS `Método`, g.referencia AS `Referencia`, COALESCE(u.username, '-') AS `Registró` "
+          + "FROM pagos_proveedor g JOIN cuentas_por_pagar x ON x.id_cxp = g.id_cxp JOIN proveedores p ON p.id_proveedor = x.id_proveedor JOIN compras c ON c.id_compra = x.id_compra "
+          + "LEFT JOIN usuarios u ON u.id_usuario = g.id_usuario WHERE g.fecha BETWEEN @d AND @h ORDER BY g.fecha, g.id_pago", false),
         new Rep("Bitácora de auditoría (solo administrador)",
             "SELECT b.fecha AS `Fecha`, COALESCE(u.username, '-') AS `Usuario`, b.accion AS `Acción`, b.entidad AS `Sobre`, b.id_entidad AS `Id`, b.detalle AS `Detalle` FROM bitacora b LEFT JOIN usuarios u ON u.id_usuario = b.id_usuario "
           + "WHERE DATE(b.fecha) BETWEEN @d AND @h ORDER BY b.id_bitacora DESC LIMIT 5000", true)
