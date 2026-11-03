@@ -38,7 +38,7 @@ public class ComprasPanel extends JPanel implements Actualizable {
         Ui.alinearDerecha(tCompras, 8);
         compras.add(new JScrollPane(tCompras), BorderLayout.CENTER);
         compras.add(Ui.fila(Ui.boton("Nueva compra", this::nuevaCompra), Ui.boton("Ver detalle", this::verDetalle),
-                Ui.boton("Recibir (borrador)", this::recibir), Ui.boton("Anular borrador", this::anularBorrador)), BorderLayout.SOUTH);
+                Ui.boton("Recibir (borrador)", this::recibir), Ui.boton("Anular borrador", () -> Autorizacion.ejecutar(this, "compras.anular", "anular compras", this::anularBorrador))), BorderLayout.SOUTH);
 
         JPanel prov = new JPanel(new BorderLayout(6, 6));
         tProv.getColumnModel().getColumn(0).setMaxWidth(50);

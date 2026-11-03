@@ -67,6 +67,14 @@ public final class Sesion {
         ACCIONES.put("inventario.carga_masiva", "Cargar o ajustar el inventario en masa (Excel)");
         ACCIONES.put("pos.traspasos", "Hacer traspasos entre almacenes");
         ACCIONES.put("compras.pagar", "Pagar a proveedores (cuentas por pagar)");
+        // Funciones de administrador. REGLA: toda función delicada nueva se registra aquí (y se protege con Autorizacion.ejecutar)
+        // y toda pantalla nueva se registra en ui/Modulos: así aparecen solas en «Roles y permisos».
+        ACCIONES.put("factura.anular", "Anular facturas");
+        ACCIONES.put("factura.reemitir", "Re-emitir facturas corregidas");
+        ACCIONES.put("fiscal.cai", "Registrar, editar o desactivar un CAI");
+        ACCIONES.put("inventario.ajustar", "Ajustar existencias del inventario");
+        ACCIONES.put("compras.anular", "Anular compras en borrador");
+        ACCIONES.put("config.editar", "Cambiar la configuración del sistema");
     }
 
     private static final Set<String> TODAS_POS = new java.util.LinkedHashSet<>(ACCIONES.keySet());
@@ -75,8 +83,8 @@ public final class Sesion {
             "RECEPCION", Set.of("pos.cobrar", "pos.precuenta", "pos.dividir", "pos.cambiar_mesa", "pos.cargar_habitacion", "pos.ver_todas", "pos.cambiar_lista", "pos.corte_x", "pos.borrar_linea", "pos.cambiar_cantidad"),
             "CAJERO", Set.of("pos.cobrar", "pos.precuenta", "pos.dividir", "pos.cambiar_mesa", "pos.cargar_habitacion", "pos.ver_todas", "pos.cambiar_lista", "pos.corte_x", "pos.borrar_linea", "pos.cambiar_cantidad"),
             "MESERO", Set.of("pos.precuenta", "pos.dividir", "pos.cambiar_mesa", "pos.borrar_linea", "pos.cambiar_cantidad"),
-            "CONTADOR", Set.of("compras.pagar"),
-            "BODEGA", Set.of("pos.traspasos", "inventario.carga_masiva")
+            "CONTADOR", Set.of("compras.pagar", "factura.anular", "factura.reemitir", "fiscal.cai", "compras.anular"),
+            "BODEGA", Set.of("pos.traspasos", "inventario.carga_masiva", "inventario.ajustar", "compras.anular")
     );
 
     /** Permisos de fábrica de un rol (módulos y acciones). */
@@ -89,6 +97,21 @@ public final class Sesion {
     private static final Map<String, Set<String>> PERSONALIZADOS = new java.util.HashMap<>();
     /** Por rol: acciones bloqueadas que NO admiten autorización con clave (quedan negadas del todo). */
     private static final Map<String, Set<String>> SIN_CLAVE = new java.util.HashMap<>();
+    /** Por rol: pantallas que NO ve libremente pero que se abren con la clave de un supervisor (aparecen con candado). */
+    private static final Map<String, Set<String>> PANTALLA_CON_CLAVE = new java.util.HashMap<>();
+
+    public static synchronized boolean pideClavePantalla(String rolx, String modulo) {
+        return PANTALLA_CON_CLAVE.getOrDefault(rolx, Set.of()).contains(modulo);
+    }
+
+    /** ¿Aparece en el menú con candado y se abre con clave de supervisor? */
+    public static boolean conCandado(String modulo) {
+        if (!moduloActivo(modulo) || esAdmin() || efectivos(rol).contains(modulo)) return false;
+        return pideClavePantalla(rol, modulo);
+    }
+
+    /** ¿Se muestra en el menú (libre o con candado)? */
+    public static boolean accesible(String modulo) { return puede(modulo) || conCandado(modulo); }
 
     /** ¿Esta acción, estando bloqueada para el rol actual, queda negada sin posibilidad de pedir clave de supervisor? */
     public static synchronized boolean negadaSinClave(String accion) {
@@ -109,6 +132,11 @@ public final class Sesion {
     public static synchronized void cargarPermisos() {
         PERSONALIZADOS.clear();
         SIN_CLAVE.clear();
+        PANTALLA_CON_CLAVE.clear();
+        try {
+            for (Map<String, Object> f : hn.hotel.db.Db.query("SELECT rol, permiso FROM permisos_con_clave"))
+                PANTALLA_CON_CLAVE.computeIfAbsent(String.valueOf(f.get("rol")), k -> new java.util.HashSet<>()).add(String.valueOf(f.get("permiso")));
+        } catch (RuntimeException e) { PANTALLA_CON_CLAVE.clear(); }
         try {
             for (Map<String, Object> f : hn.hotel.db.Db.query("SELECT rol, permiso FROM permisos_sin_clave"))
                 SIN_CLAVE.computeIfAbsent(String.valueOf(f.get("rol")), k -> new java.util.HashSet<>()).add(String.valueOf(f.get("permiso")));
@@ -133,11 +161,16 @@ public final class Sesion {
         return esAdmin() || efectivos(rol).contains(accion);
     }
 
-    public static boolean puede(String modulo) {
+    private static boolean moduloActivo(String modulo) {
         if (!hotelActivo && MODULOS_HOTEL.contains(modulo)) return false;
         if (!restauranteActivo && MODULOS_RESTAURANTE.contains(modulo)) return false;
         if (!restauranteActivo && !retailActivo && MODULOS_PRODUCTOS.contains(modulo)) return false;
         if (!retailActivo && modulo.equals("pos_retail")) return false;
+        return true;
+    }
+
+    public static boolean puede(String modulo) {
+        if (!moduloActivo(modulo)) return false;
         if (esAdmin()) return true;
         return efectivos(rol).contains(modulo);
     }

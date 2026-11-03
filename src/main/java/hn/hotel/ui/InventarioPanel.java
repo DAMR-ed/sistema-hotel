@@ -56,7 +56,7 @@ public class InventarioPanel extends JPanel implements Actualizable {
         buscar.addActionListener(e -> alMostrar());
         ex.add(Ui.fila(Ui.botonPrimario("+ Nuevo insumo", () -> formulario(null)),
                 Ui.boton("Editar", () -> { int id = Ui.idSeleccionado(tabla); if (id > 0) formulario(id); else aviso(); }),
-                Ui.boton("Ajustar existencia", this::ajustar),
+                Ui.boton("Ajustar existencia", () -> Autorizacion.ejecutar(this, "inventario.ajustar", "ajustar existencias", this::ajustar)),
                 Ui.boton("Carga masiva (Excel)...", () -> Autorizacion.ejecutar(this, "inventario.carga_masiva", "cargar el inventario en masa", () -> CargaMasivaInventario.mostrar(this, this::alMostrar))),
                 Ui.boton("Kardex del insumo", this::kardex),
                 Ui.boton("Vender en el POS...", this::venderEnPos),

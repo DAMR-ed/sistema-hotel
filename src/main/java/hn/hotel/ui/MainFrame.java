@@ -49,7 +49,7 @@ public class MainFrame extends JFrame {
         JPanel der = new JPanel(new FlowLayout(FlowLayout.RIGHT, 10, 0));
         der.setOpaque(false);
         btnAlertas.putClientProperty("JButton.buttonType", "roundRect");
-        btnAlertas.addActionListener(e -> { if (Sesion.puede("alarmas")) mostrar("alarmas"); });
+        btnAlertas.addActionListener(e -> { if (Sesion.accesible("alarmas")) mostrar("alarmas"); });
         der.add(btnAlertas);
         var puntos = hn.hotel.service.Almacenes.permitidos();
         String actual = hn.hotel.service.Almacenes.nombrePuntoActual();
@@ -108,7 +108,8 @@ public class MainFrame extends JFrame {
 
         String grupoActual = "";
         for (Modulos.Modulo m : Modulos.todos()) {
-            if (!Sesion.puede(m.id())) continue;
+            if (!Sesion.accesible(m.id())) continue;
+            boolean candado = Sesion.conCandado(m.id());
             modulos.put(m.id(), m);
             if (!m.grupo().equals(grupoActual)) {
                 grupoActual = m.grupo();
@@ -119,7 +120,8 @@ public class MainFrame extends JFrame {
                 g.setAlignmentX(Component.LEFT_ALIGNMENT);
                 menu.add(g);
             }
-            JButton b = new JButton(m.titulo());
+            JButton b = new JButton(candado ? "\uD83D\uDD12 " + m.titulo() : m.titulo());
+            if (candado) b.setToolTipText("Se abre con la clave de un supervisor");
             b.putClientProperty("JButton.buttonType", "borderless");
             b.setAlignmentX(Component.LEFT_ALIGNMENT);
             b.setHorizontalAlignment(SwingConstants.LEFT);
@@ -157,6 +159,16 @@ public class MainFrame extends JFrame {
     }
 
     public void mostrar(String id) {
+        Modulos.Modulo m = modulos.get(id);
+        if (m == null) return;
+        if (Sesion.conCandado(id)) {
+            Autorizacion.ejecutar(this, id, "abrir «" + m.titulo() + "»", () -> mostrarDirecto(id));
+            return;
+        }
+        mostrarDirecto(id);
+    }
+
+    private void mostrarDirecto(String id) {
         Modulos.Modulo m = modulos.get(id);
         if (m == null) return;
         JPanel p = creados.get(id);

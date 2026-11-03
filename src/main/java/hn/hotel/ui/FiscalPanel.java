@@ -39,7 +39,7 @@ public class FiscalPanel extends JPanel implements Actualizable {
             }
         });
         cai.add(new JScrollPane(tCai), BorderLayout.CENTER);
-        cai.add(Ui.fila(Ui.boton("Registrar nuevo CAI", this::nuevoCai), Ui.boton("Punto de venta y alertas...", this::editarCai), Ui.boton("Activar / desactivar", this::alternar),
+        cai.add(Ui.fila(Ui.boton("Registrar nuevo CAI", () -> Autorizacion.ejecutar(this, "fiscal.cai", "registrar un CAI", this::nuevoCai)), Ui.boton("Punto de venta y alertas...", () -> Autorizacion.ejecutar(this, "fiscal.cai", "editar un CAI", this::editarCai)), Ui.boton("Activar / desactivar", () -> Autorizacion.ejecutar(this, "fiscal.cai", "activar o desactivar un CAI", this::alternar)),
                 new JLabel("<html><i>Los datos salen de la constancia que entrega el SAR.</i></html>")), BorderLayout.SOUTH);
 
         JPanel libro = new JPanel(new BorderLayout(4, 4));

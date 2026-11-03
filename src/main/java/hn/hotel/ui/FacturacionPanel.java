@@ -32,8 +32,8 @@ public class FacturacionPanel extends JPanel implements Actualizable {
         add(Ui.fila(
                 Ui.boton("Ver / imprimir", () -> { int id = Ui.idSeleccionado(tabla); if (id > 0) FacturaVista.mostrar(this, id); else aviso(); }),
                 Ui.boton("Cobrar cuenta del restaurante...", this::cobrarComanda),
-                Ui.boton("Anular", this::anular),
-                Ui.boton("Re-emitir corregida", this::reemitir),
+                Ui.boton("Anular", () -> Autorizacion.ejecutar(this, "factura.anular", "anular facturas", this::anular)),
+                Ui.boton("Re-emitir corregida", () -> Autorizacion.ejecutar(this, "factura.reemitir", "re-emitir facturas", this::reemitir)),
                 Ui.boton("Exportar (CSV)", () -> Exportar.csv(this, modelo, "facturas_" + LocalDate.now()))), BorderLayout.SOUTH);
         add(new JLabel("<html><i>Las facturas no se borran ni se editan: se anulan con motivo y, si hubo error, se re-emiten con el siguiente número.</i></html>"), BorderLayout.PAGE_END);
     }

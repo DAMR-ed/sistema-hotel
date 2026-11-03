@@ -21,10 +21,10 @@ public class ConfigPanel extends JPanel implements Actualizable {
         tabla.getColumnModel().getColumn(1).setPreferredWidth(200);
         tabla.getColumnModel().getColumn(2).setPreferredWidth(600);
         add(new JScrollPane(tabla), BorderLayout.CENTER);
-        add(Ui.fila(Ui.boton("Cambiar valor", this::editar),
+        add(Ui.fila(Ui.boton("Cambiar valor", () -> Autorizacion.ejecutar(this, "config.editar", "cambiar la configuración", this::editar)),
                 new JLabel("<html><i>Los datos del hotel salen impresos en la factura. Los porcentajes de impuestos deben confirmarse con su contador / el SAR.</i></html>")), BorderLayout.SOUTH);
         tabla.addMouseListener(new java.awt.event.MouseAdapter() {
-            @Override public void mouseClicked(java.awt.event.MouseEvent e) { if (e.getClickCount() == 2) editar(); }
+            @Override public void mouseClicked(java.awt.event.MouseEvent e) { if (e.getClickCount() == 2) Autorizacion.ejecutar(ConfigPanel.this, "config.editar", "cambiar la configuración", ConfigPanel.this::editar); }
         });
     }
 
