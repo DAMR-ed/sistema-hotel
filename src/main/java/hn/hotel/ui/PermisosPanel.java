@@ -1,0 +1,97 @@
+package hn.hotel.ui;
+
+import hn.hotel.app.Sesion;
+import hn.hotel.db.Db;
+import hn.hotel.service.Bitacora;
+
+import javax.swing.*;
+import java.awt.*;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
+
+/** Control de acceso: qué pantallas ve cada rol y qué acciones del POS puede hacer sin autorización de un supervisor. */
+public class PermisosPanel extends JPanel implements Actualizable {
+    private static final String[] ROLES = {"SUPERVISOR", "RECEPCION", "AMA_LLAVES", "CAJERO", "MESERO", "COCINA", "BODEGA", "CONTADOR"};
+    private final JComboBox<String> cmbRol = new JComboBox<>(ROLES);
+    private final JPanel pantallas = new JPanel(), acciones = new JPanel();
+    private final Map<String, JCheckBox> cajas = new LinkedHashMap<>();
+    private final JLabel estado = new JLabel(" ");
+
+    public PermisosPanel() {
+        setLayout(new BorderLayout(0, 12));
+        setBorder(BorderFactory.createEmptyBorder(16, 20, 16, 20));
+        add(new JLabel("<html><span style='font-size:20px'><b>Roles y permisos</b></span><br><span style='color:#64748B'>"
+                + "Marque lo que cada rol puede ver y hacer. Lo que no marque queda bloqueado: en el POS, el sistema pedirá usuario y contraseña de un "
+                + "supervisor (o administrador) que sí tenga ese permiso. El rol ADMIN siempre puede todo.</span></html>"), BorderLayout.NORTH);
+
+        pantallas.setLayout(new BoxLayout(pantallas, BoxLayout.Y_AXIS));
+        acciones.setLayout(new BoxLayout(acciones, BoxLayout.Y_AXIS));
+        Tema.Tarjeta izq = new Tema.Tarjeta(new BorderLayout(0, 6), null);
+        izq.add(new JLabel("<html><b>Pantallas que ve</b></html>"), BorderLayout.NORTH);
+        izq.add(new JScrollPane(pantallas), BorderLayout.CENTER);
+        Tema.Tarjeta der = new Tema.Tarjeta(new BorderLayout(0, 6), null);
+        der.add(new JLabel("<html><b>Acciones del punto de venta</b> <span style='color:#64748B'>(si no se marca → pide autorización)</span></html>"), BorderLayout.NORTH);
+        der.add(new JScrollPane(acciones), BorderLayout.CENTER);
+        JPanel centro = new JPanel(new GridLayout(1, 2, 14, 0));
+        centro.setOpaque(false);
+        centro.add(izq);
+        centro.add(der);
+        add(centro, BorderLayout.CENTER);
+
+        for (Modulos.Modulo m : Modulos.todos()) {
+            if (m.id().equals("inicio") || m.id().equals("permisos") || m.id().equals("usuarios") || m.id().equals("config")) continue;
+            JCheckBox c = new JCheckBox(m.titulo() + "  (" + m.grupo().toLowerCase() + ")");
+            cajas.put(m.id(), c);
+            pantallas.add(c);
+        }
+        for (Map.Entry<String, String> a : Sesion.ACCIONES.entrySet()) {
+            JCheckBox c = new JCheckBox(a.getValue());
+            cajas.put(a.getKey(), c);
+            acciones.add(c);
+        }
+
+        JPanel sur = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        sur.setOpaque(false);
+        sur.add(new JLabel("Rol:"));
+        sur.add(cmbRol);
+        sur.add(Ui.botonPrimario("Guardar permisos del rol", this::guardar));
+        sur.add(Ui.boton("Restablecer valores de fábrica", this::restablecer));
+        sur.add(estado);
+        add(sur, BorderLayout.SOUTH);
+        cmbRol.addActionListener(e -> cargar());
+    }
+
+    @Override public void alMostrar() { cargar(); }
+
+    private void cargar() {
+        String rol = (String) cmbRol.getSelectedItem();
+        Set<String> ef = Sesion.efectivos(rol);
+        for (Map.Entry<String, JCheckBox> e : cajas.entrySet()) e.getValue().setSelected(ef.contains(e.getKey()));
+        boolean personalizado = Db.scalar("SELECT 1 FROM permisos_rol WHERE rol = ? LIMIT 1", rol) != null;
+        estado.setText(personalizado ? "   Permisos personalizados" : "   Permisos de fábrica");
+    }
+
+    private void guardar() {
+        String rol = (String) cmbRol.getSelectedItem();
+        Ui.seguro(this, () -> {
+            Db.transaccion(tx -> {
+                tx.exec("DELETE FROM permisos_rol WHERE rol = ?", rol);
+                tx.exec("INSERT INTO permisos_rol (rol, permiso) VALUES (?, 'inicio')", rol);
+                for (Map.Entry<String, JCheckBox> e : cajas.entrySet())
+                    if (e.getValue().isSelected()) tx.exec("INSERT INTO permisos_rol (rol, permiso) VALUES (?,?)", rol, e.getKey());
+                return null;
+            });
+            Bitacora.registrar("PERMISOS", "rol", rol, "Permisos actualizados");
+            Sesion.cargarPermisos();
+            cargar();
+            Ui.info(this, "Permisos guardados. Los usuarios con ese rol los verán al volver a iniciar sesión.");
+        });
+    }
+
+    private void restablecer() {
+        String rol = (String) cmbRol.getSelectedItem();
+        if (!Ui.confirmar(this, "¿Volver los permisos de " + rol + " a los de fábrica?")) return;
+        Ui.seguro(this, () -> { Db.exec("DELETE FROM permisos_rol WHERE rol = ?", rol); Sesion.cargarPermisos(); cargar(); });
+    }
+}
