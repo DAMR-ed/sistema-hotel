@@ -1,6 +1,6 @@
-target/
+/target/
 .idea/
 *.iml
-hotel.properties
-salida/
-app/
+/hotel.properties
+/salida/
+/app/
