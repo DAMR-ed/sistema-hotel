@@ -2286,3 +2286,28 @@ FROM recordatorios rc
 WHERE rc.estado = 'PENDIENTE' AND rc.fecha_hora <= DATE_ADD(NOW(), INTERVAL 1 DAY);
 
 SELECT 'OK' AS resultado;
+
+-- ===== 20_usuario_punto_venta =====
+-- =====================================================================
+-- 20_usuario_punto_venta.sql  -  Punto de venta asignado a cada usuario
+-- Ejecutar UNA vez, con root, después de 19.
+-- Cada usuario puede tener uno o varios puntos de venta. Al iniciar sesión usa el predeterminado y puede
+-- cambiar a otro de los suyos desde la barra superior. Sin puntos asignados se usa el punto de la computadora.
+-- =====================================================================
+
+ALTER TABLE usuarios
+  ADD COLUMN id_punto_venta INT UNSIGNED NULL,
+  ADD CONSTRAINT fk_usuario_punto FOREIGN KEY (id_punto_venta) REFERENCES puntos_venta (id_punto);
+
+CREATE TABLE IF NOT EXISTS usuario_puntos (
+  id_usuario INT UNSIGNED NOT NULL,
+  id_punto   INT UNSIGNED NOT NULL,
+  PRIMARY KEY (id_usuario, id_punto),
+  CONSTRAINT fk_up_usuario FOREIGN KEY (id_usuario) REFERENCES usuarios (id_usuario),
+  CONSTRAINT fk_up_punto   FOREIGN KEY (id_punto)   REFERENCES puntos_venta (id_punto)
+) ENGINE=InnoDB;
+
+-- Los usuarios que ya tenían un punto predeterminado lo conservan como permitido.
+INSERT IGNORE INTO usuario_puntos (id_usuario, id_punto) SELECT id_usuario, id_punto_venta FROM usuarios WHERE id_punto_venta IS NOT NULL;
+
+SELECT 'OK' AS resultado;

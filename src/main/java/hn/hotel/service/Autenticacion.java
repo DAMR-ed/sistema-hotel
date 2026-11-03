@@ -58,6 +58,10 @@ public final class Autenticacion {
             Sesion.username = Db.str(u.get("username"));
             Sesion.nombre = Db.str(u.get("nombre"));
             Sesion.rol = Db.str(u.get("rol"));
+            try {
+                Object pv = Db.scalar("SELECT id_punto_venta FROM usuarios WHERE id_usuario = ?", id);
+                Sesion.idPuntoVenta = pv == null ? null : Db.ent(pv);
+            } catch (RuntimeException e) { Sesion.idPuntoVenta = null; }   // aún no se ha corrido el script 20
             Sesion.cargarNegocio();
             Sesion.cargarPermisos();
             Bitacora.registrar("LOGIN", "usuario", id, "Inicio de sesión");

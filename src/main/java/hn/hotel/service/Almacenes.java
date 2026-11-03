@@ -32,9 +32,31 @@ public final class Almacenes {
         usar(tx, a == null ? null : Db.ent(a));
     }
 
+    /** Puntos de venta en los que puede trabajar el usuario actual (el administrador, en todos). Cada fila: id_punto, nombre. */
+    public static java.util.List<java.util.Map<String, Object>> permitidos() {
+        try {
+            if (hn.hotel.app.Sesion.esAdmin()) return Db.query("SELECT id_punto, nombre FROM puntos_venta WHERE activo = 1 ORDER BY nombre");
+            return Db.query("SELECT p.id_punto, p.nombre FROM usuario_puntos u JOIN puntos_venta p ON p.id_punto = u.id_punto WHERE u.id_usuario = ? AND p.activo = 1 ORDER BY p.nombre",
+                    hn.hotel.app.Sesion.idUsuario);
+        } catch (RuntimeException e) { return java.util.List.of(); }   // aún no se ha corrido el script 20
+    }
+
+    public static String nombrePuntoActual() {
+        Integer id = puntoLocal();
+        if (id == null) return null;
+        Object n = Db.scalar("SELECT nombre FROM puntos_venta WHERE id_punto = ?", id);
+        return n == null ? null : n.toString();
+    }
+
     // ------------------------------------------------------------------ punto de venta de ESTA computadora
     /** Punto de venta configurado en esta PC (hotel.properties), o null. */
     public static synchronized Integer puntoLocal() {
+        if (hn.hotel.app.Sesion.idPuntoVenta != null) return hn.hotel.app.Sesion.idPuntoVenta;   // el punto asignado al usuario manda
+        return puntoDeLaPc();
+    }
+
+    /** Punto de venta configurado solo en esta computadora. */
+    public static synchronized Integer puntoDeLaPc() {
         File f = Db.archivoConfig();
         if (!f.exists()) return null;
         Properties p = new Properties();

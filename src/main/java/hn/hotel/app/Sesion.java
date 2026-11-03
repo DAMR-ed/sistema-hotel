@@ -10,6 +10,8 @@ public final class Sesion {
     public static String username = "";
     public static String nombre = "";
     public static String rol = "";
+    /** Punto de venta asignado al usuario (null = el de la computadora). */
+    public static Integer idPuntoVenta = null;
 
     public static boolean esAdmin() { return "ADMIN".equals(rol); }
 
@@ -141,6 +143,6 @@ public final class Sesion {
     }
 
     public static void cerrar() {
-        idUsuario = 0; username = ""; nombre = ""; rol = "";
+        idUsuario = 0; username = ""; nombre = ""; rol = ""; idPuntoVenta = null;
     }
 }

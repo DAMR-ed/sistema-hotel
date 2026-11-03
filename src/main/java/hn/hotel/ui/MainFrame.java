@@ -51,6 +51,28 @@ public class MainFrame extends JFrame {
         btnAlertas.putClientProperty("JButton.buttonType", "roundRect");
         btnAlertas.addActionListener(e -> { if (Sesion.puede("alarmas")) mostrar("alarmas"); });
         der.add(btnAlertas);
+        var puntos = hn.hotel.service.Almacenes.permitidos();
+        String actual = hn.hotel.service.Almacenes.nombrePuntoActual();
+        if (puntos.size() > 1 || (actual != null && !puntos.isEmpty())) {
+            JButton pv = Ui.boton("Punto de venta: " + (actual == null ? "(ninguno)" : actual) + "  ▾", () -> { });
+            pv.setToolTipText("Cambiar el punto de venta con el que factura y descarga inventario");
+            for (java.awt.event.ActionListener al : pv.getActionListeners()) pv.removeActionListener(al);
+            pv.addActionListener(e -> {
+                JPopupMenu menu = new JPopupMenu();
+                for (var pt : puntos) {
+                    int idp = Db.ent(pt.get("id_punto"));
+                    JMenuItem it = new JMenuItem(Db.str(pt.get("nombre")));
+                    it.addActionListener(ev -> {
+                        Sesion.idPuntoVenta = idp;
+                        pv.setText("Punto de venta: " + Db.str(pt.get("nombre")) + "  ▾");
+                        hn.hotel.service.Bitacora.registrar("CAMBIO_PUNTO", "punto_venta", idp, Sesion.username);
+                    });
+                    menu.add(it);
+                }
+                menu.show(pv, 0, pv.getHeight());
+            });
+            der.add(pv);
+        }
         JLabel usuario = new JLabel("<html><b>" + Sesion.nombre + "</b><br><span style='color:#64748B;font-size:10px'>"
                 + Sesion.rol + "</span></html>");
         der.add(usuario);

@@ -89,7 +89,7 @@ public class AlmacenesPanel extends JPanel implements Actualizable {
                 @SuppressWarnings("unchecked") var t = (List<Map<String, Object>>) r[2];
                 @SuppressWarnings("unchecked") var al = (List<Map<String, Object>>) r[3];
                 Ui.llenar(mAlm, a, "id_almacen", "nombre", "descripcion", "princ", "act", "n");
-                Integer local = Almacenes.puntoLocal();
+                Integer local = Almacenes.puntoDeLaPc();
                 mPv.setRowCount(0);
                 String nombreLocal = null;
                 for (Map<String, Object> f : p) {
