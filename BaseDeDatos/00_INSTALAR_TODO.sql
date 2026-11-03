@@ -1,4 +1,4 @@
--- SISTEMA HOTEL Y RESTAURANTE - INSTALACION COMPLETA DE LA BASE DE DATOS (01 + 04 a 14)
+-- SISTEMA HOTEL Y RESTAURANTE - INSTALACION COMPLETA DE LA BASE DE DATOS (01 + 04 a 15)
 -- ATENCION: borra y recrea hotel_sistema. Usar solo en una instalacion nueva.
 
 -- ================= 01_schema_hotel_v2.sql =================
@@ -1858,4 +1858,49 @@ INSERT IGNORE INTO configuracion (clave, valor, descripcion) VALUES
 ALTER TABLE productos_menu ADD COLUMN codigo_barras VARCHAR(40) NULL, ADD UNIQUE KEY uk_productos_barras (codigo_barras);
 
 SELECT 'OK' AS resultado;
+
+
+-- ================= 15_autoconsumo.sql =================
+SET NAMES utf8mb4;
+-- =====================================================================
+-- 15_autoconsumo.sql  -  Autoconsumos: salida de inventario SIN venta, con motivo y reporte
+-- Ejecutar UNA vez, con root, después de 14.
+-- =====================================================================
+USE hotel_sistema;
+
+ALTER TABLE comandas
+  MODIFY estado ENUM('ABIERTA','CERRADA','CARGADA_HABITACION','FACTURADA','ANULADA','AUTOCONSUMO') NOT NULL DEFAULT 'ABIERTA';
+
+ALTER TABLE movimientos_inventario
+  MODIFY tipo ENUM('COMPRA','SALIDA_VENTA','DEVOLUCION','AJUSTE','MERMA','INVENTARIO_INICIAL','PRODUCCION_ENTRADA','PRODUCCION_SALIDA','AUTOCONSUMO') NOT NULL;
+
+CREATE TABLE IF NOT EXISTS motivos_autoconsumo (
+  id_motivo INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  nombre    VARCHAR(60) NOT NULL,
+  activo    TINYINT(1)  NOT NULL DEFAULT 1,
+  PRIMARY KEY (id_motivo),
+  UNIQUE KEY uk_motivo_nombre (nombre)
+) ENGINE=InnoDB;
+
+INSERT IGNORE INTO motivos_autoconsumo (nombre) VALUES
+  ('Consumo de empleados'), ('Cortesía de la gerencia'), ('Degustación / prueba de platos'), ('Error de preparación');
+
+CREATE TABLE IF NOT EXISTS autoconsumos (
+  id_autoconsumo INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  id_comanda     INT UNSIGNED NOT NULL,
+  id_motivo      INT UNSIGNED NOT NULL,
+  fecha          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  id_usuario     INT UNSIGNED NULL,          -- quien lo registró
+  id_autoriza    INT UNSIGNED NULL,          -- supervisor que lo autorizó con su clave (si hizo falta)
+  costo_total    DECIMAL(14,2) NOT NULL DEFAULT 0,   -- costo del inventario descargado
+  notas          VARCHAR(200) NULL,
+  PRIMARY KEY (id_autoconsumo),
+  UNIQUE KEY uk_auto_comanda (id_comanda),
+  KEY idx_auto_fecha (fecha),
+  CONSTRAINT fk_auto_comanda FOREIGN KEY (id_comanda) REFERENCES comandas (id_comanda),
+  CONSTRAINT fk_auto_motivo  FOREIGN KEY (id_motivo)  REFERENCES motivos_autoconsumo (id_motivo),
+  CONSTRAINT fk_auto_usuario FOREIGN KEY (id_usuario) REFERENCES usuarios (id_usuario)
+) ENGINE=InnoDB;
+
+SELECT 'OK' AS resultado, (SELECT COUNT(*) FROM motivos_autoconsumo) AS motivos;
 

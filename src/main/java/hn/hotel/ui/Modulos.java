@@ -24,6 +24,7 @@ public final class Modulos {
                 new Modulo("restaurante", "Plano de mesas", "RESTAURANTE", RestaurantePanel::new),
                 new Modulo("pos_retail", "Caja de tienda", "TIENDA", PosRetailPanel::new),
                 new Modulo("menu", hn.hotel.app.Sesion.restauranteActivo ? "Menú y recetas" : "Productos y recetas", hn.hotel.app.Sesion.restauranteActivo ? "RESTAURANTE" : "TIENDA", MenuPanel::new),
+                new Modulo("autoconsumo", "Autoconsumos", "RESTAURANTE", AutoconsumoPanel::new),
                 new Modulo("estaciones", "Estaciones de comanda", "RESTAURANTE", EstacionesPanel::new),
 
                 new Modulo("inventario", "Inventario", "INVENTARIO", InventarioPanel::new),

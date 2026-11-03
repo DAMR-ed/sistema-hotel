@@ -223,6 +223,34 @@ public final class RestauranteService {
         });
     }
 
+    /**
+     * Autoconsumo: la cuenta NO genera venta ni factura, pero descarga todo su inventario (platos y opciones).
+     * Los movimientos quedan como tipo AUTOCONSUMO en el kardex y el costo se guarda para el reporte.
+     */
+    public static void autoconsumo(int idComanda, int idMotivo, String notas) {
+        Db.transaccion(tx -> {
+            exigirAbierta(tx, idComanda);
+            if (tx.scalar("SELECT 1 FROM comanda_detalle WHERE id_comanda = ? AND estado <> 'ANULADO' LIMIT 1", idComanda) == null)
+                throw new IllegalArgumentException("La cuenta no tiene platos.");
+            if (tx.scalar("SELECT 1 FROM motivos_autoconsumo WHERE id_motivo = ? AND activo = 1", idMotivo) == null)
+                throw new IllegalArgumentException("Elija un motivo de autoconsumo válido.");
+            tx.call("{CALL sp_descontar_inventario_comanda(?)}", idComanda);
+            descontarOpciones(tx, idComanda);
+            String ref = "Autoconsumo #" + idComanda;
+            tx.exec("UPDATE movimientos_inventario SET tipo = 'AUTOCONSUMO', referencia = ? WHERE tipo = 'SALIDA_VENTA' AND "
+                    + "(id_detalle_comanda IN (SELECT id_detalle FROM comanda_detalle WHERE id_comanda = ?) OR referencia IN (?, ?))",
+                    ref, idComanda, "Comanda #" + idComanda, "Comanda #" + idComanda + " (opción)");
+            Object costo = tx.scalar("SELECT COALESCE(SUM(-cantidad * costo_unitario), 0) FROM movimientos_inventario WHERE tipo = 'AUTOCONSUMO' AND referencia = ?", ref);
+            tx.exec("INSERT INTO autoconsumos (id_comanda, id_motivo, id_usuario, id_autoriza, costo_total, notas) VALUES (?,?,?,?,?,?)",
+                    idComanda, idMotivo, Sesion.idUsuario, Sesion.autorizadoPor > 0 ? Sesion.autorizadoPor : null, costo,
+                    notas == null || notas.isBlank() ? null : notas.trim());
+            tx.exec("UPDATE comandas SET estado = 'AUTOCONSUMO', cerrada_en = NOW() WHERE id_comanda = ?", idComanda);
+            liberarMesaSiCorresponde(tx, idComanda);
+            Bitacora.registrar("AUTOCONSUMO", "comanda", idComanda, "motivo " + idMotivo + ", costo " + costo);
+            return null;
+        });
+    }
+
     public static void reabrir(int idComanda) {
         int n = Db.exec("UPDATE comandas SET estado = 'ABIERTA', cerrada_en = NULL WHERE id_comanda = ? AND estado = 'CERRADA'", idComanda);
         if (n == 0) throw new IllegalArgumentException("Solo se reabren cuentas cerradas que no se han cobrado.");

@@ -15,21 +15,21 @@ public final class Sesion {
 
     /** Módulos que ve cada rol. ADMIN ve todo. */
     private static final Map<String, Set<String>> PERMISOS = Map.of(
-            "SUPERVISOR", Set.of("inicio", "pos_retail", "cortes", "pos_rest", "cocina", "restaurante", "menu", "estaciones", "inventario", "manufactura", "compras", "facturacion", "credito", "vpos", "alarmas", "reportes"),
+            "SUPERVISOR", Set.of("inicio", "autoconsumo", "pos_retail", "cortes", "pos_rest", "cocina", "restaurante", "menu", "estaciones", "inventario", "manufactura", "compras", "facturacion", "credito", "vpos", "alarmas", "reportes"),
             "RECEPCION", Set.of("inicio", "pos_retail", "cortes", "plano", "reservas", "estancias", "huespedes", "facturacion", "credito", "alarmas", "reportes", "pos_rest"),
             "AMA_LLAVES", Set.of("inicio", "plano", "alarmas"),
             "CAJERO", Set.of("inicio", "pos_retail", "cortes", "facturacion", "credito", "vpos", "pos_rest", "reportes", "alarmas"),
             "MESERO", Set.of("inicio", "pos_rest"),
             "COCINA", Set.of("inicio", "cocina"),
-            "BODEGA", Set.of("inicio", "inventario", "manufactura", "compras", "alarmas"),
-            "CONTADOR", Set.of("inicio", "cortes", "facturacion", "credito", "vpos", "reportes", "fiscal", "impuestos")
+            "BODEGA", Set.of("inicio", "autoconsumo", "inventario", "manufactura", "compras", "alarmas"),
+            "CONTADOR", Set.of("inicio", "autoconsumo", "cortes", "facturacion", "credito", "vpos", "reportes", "fiscal", "impuestos")
     );
 
     /** Tipo de negocio (configuración «modulo_hotel» y «modulo_restaurante»): permite usar el sistema solo para restaurante o solo para hotel. */
     public static boolean hotelActivo = true, restauranteActivo = true, retailActivo = false;
 
     private static final Set<String> MODULOS_HOTEL = Set.of("plano", "reservas", "estancias", "huespedes");
-    private static final Set<String> MODULOS_RESTAURANTE = Set.of("pos_rest", "cocina", "restaurante", "estaciones");
+    private static final Set<String> MODULOS_RESTAURANTE = Set.of("pos_rest", "cocina", "restaurante", "estaciones", "autoconsumo");
     /** Se usan en restaurante y también en tienda (productos y su receta/inventario). */
     private static final Set<String> MODULOS_PRODUCTOS = Set.of("menu", "manufactura");
 
@@ -55,6 +55,7 @@ public final class Sesion {
         ACCIONES.put("pos.anular_comanda", "Anular una comanda completa");
         ACCIONES.put("pos.transferir", "Transferir mesas a otro mesero");
         ACCIONES.put("pos.disenar_mesas", "Diseñar mesas y zonas");
+        ACCIONES.put("pos.autoconsumo", "Registrar autoconsumos (cuentas sin venta que descargan inventario)");
         ACCIONES.put("pos.corte_x", "Hacer corte X (cambio de turno)");
         ACCIONES.put("pos.corte_z", "Hacer corte Z (cierre del día)");
     }
@@ -98,6 +99,11 @@ public final class Sesion {
     public static boolean permite(String accion) {
         if (esAdmin() || autorizadoPor > 0) return true;
         return efectivos(rol).contains(accion);
+    }
+
+    /** ¿Su rol tiene este permiso por sí mismo? (sin contar autorizaciones de un supervisor). Sirve para ocultar botones que no le corresponden. */
+    public static boolean tiene(String accion) {
+        return esAdmin() || efectivos(rol).contains(accion);
     }
 
     public static boolean puede(String modulo) {

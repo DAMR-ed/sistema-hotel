@@ -311,8 +311,9 @@ public class PosRestaurantePanel extends JPanel implements Actualizable {
         btnCobrar.setBackground(new Color(0x2E9E5B));
         btnCobrar.setForeground(Color.WHITE);
         btnCobrar.setFont(btnCobrar.getFont().deriveFont(Font.BOLD));
-        botones.add(btnCobrar);
+        if (Sesion.tiene("pos.cobrar")) botones.add(btnCobrar);   // el mesero no ve nada para cobrar: solo levanta pedidos
         botones.add(Ui.boton("Quitar plato", this::anularPlato));
+        botones.add(Ui.boton("Marcar servido", this::marcarServido));
         botones.add(Ui.botonPrimario("Pedir cuenta", this::pedirCuenta));
         botones.add(Ui.boton("Pre-cuenta", () -> Autorizacion.ejecutar(this, "pos.precuenta", "imprimir la pre-cuenta", this::preCuenta)));
         botones.add(Ui.boton("Mover a cuenta...", () -> Autorizacion.ejecutar(this, "pos.dividir", "dividir la cuenta", this::moverACuenta)));
@@ -321,6 +322,7 @@ public class PosRestaurantePanel extends JPanel implements Actualizable {
         botones.add(Ui.boton("Lista de precios", () -> Autorizacion.ejecutar(this, "pos.cambiar_lista", "cambiar la lista de precios", this::cambiarLista)));
         botones.add(Ui.boton("Cambiar de mesa", () -> Autorizacion.ejecutar(this, "pos.cambiar_mesa", "cambiar la cuenta de mesa", this::cambiarMesa)));
         botones.add(Ui.boton("Transferir mesero", () -> Autorizacion.ejecutar(this, "pos.transferir", "transferir la mesa a otro mesero", this::transferir)));
+        botones.add(Ui.boton("Autoconsumo", () -> Autorizacion.ejecutar(this, "pos.autoconsumo", "registrar un autoconsumo", this::autoconsumo)));
         botones.add(Ui.boton("Anular comanda", () -> Autorizacion.ejecutar(this, "pos.anular_comanda", "anular la comanda completa", this::anularComanda)));
         sur.add(botones, BorderLayout.CENTER);
         der.add(sur, BorderLayout.SOUTH);
@@ -605,6 +607,34 @@ public class PosRestaurantePanel extends JPanel implements Actualizable {
         if (ok) {
             Ui.seguro(this, () -> RestauranteService.sumarPropina(idComanda, prop[0]));
             if (!hayOtras) volverAMesas(); else cargarOrden();
+        }
+    }
+
+    /** El mesero marca como servidos los platos que cocina ya dejó listos. */
+    private void marcarServido() {
+        List<Integer> ids = seleccionados();
+        if (ids.isEmpty()) { Ui.info(this, "Seleccione los platos que ya llevó a la mesa."); return; }
+        Ui.seguro(this, () -> {
+            for (int r : tLineas.getSelectedRows()) {
+                String est = String.valueOf(mLineas.getValueAt(r, 4));
+                if (!"LISTO".equals(est)) throw new IllegalArgumentException("Solo se pueden marcar como servidos los platos que cocina ya dejó LISTOS.");
+            }
+            for (int id : ids) RestauranteService.cambiarEstadoPlato(id, "SERVIDO");
+            cargarOrden();
+        });
+    }
+
+    /** Autoconsumo: la cuenta no se vende ni se factura; descarga el inventario con un motivo. */
+    private void autoconsumo() {
+        var motivos = Db.query("SELECT id_motivo, nombre FROM motivos_autoconsumo WHERE activo = 1 ORDER BY nombre");
+        if (motivos.isEmpty()) { Ui.info(this, "No hay motivos de autoconsumo. Créelos en el módulo «Autoconsumos»."); return; }
+        JComboBox<AccionesHotel.Opcion> motivo = AccionesHotel.combo(motivos, "id_motivo", "nombre", false);
+        JTextField notas = new JTextField(24);
+        Campos.Formulario f = new Campos.Formulario().agregar("Motivo:", motivo).agregar("Notas (opcional):", notas)
+                .nota("Esta cuenta NO se cobra ni se factura. Se descarga TODO su inventario y queda en el reporte de autoconsumos.");
+        if (Campos.dialogo(this, "Registrar autoconsumo", f, () -> { RestauranteService.autoconsumo(idComanda, AccionesHotel.idDe(motivo), notas.getText()); return true; })) {
+            Ui.info(this, "Autoconsumo registrado.");
+            volverAMesas();
         }
     }
 
