@@ -188,6 +188,36 @@ public final class RestauranteService {
         if (n == 0) throw new IllegalArgumentException("El plato no está en el estado esperado.");
     }
 
+    /** Ajusta una línea de la cuenta: «DESCUENTO» (monto en L), «PRECIO» (unitario) o «CANTIDAD» (solo si aún no se envió a cocina). */
+    public static void ajustarPlato(int idDetalle, String que, BigDecimal valor, String motivo) {
+        if (valor == null || valor.signum() < 0) throw new IllegalArgumentException("El valor no puede ser negativo.");
+        if (motivo == null || motivo.isBlank()) throw new IllegalArgumentException("Escriba el motivo.");
+        Db.transaccion(tx -> {
+            Map<String, Object> d = tx.uno("SELECT d.estado, d.num_cuenta, d.id_comanda, d.cantidad, d.precio_unitario, d.descuento, c.id_usuario FROM comanda_detalle d "
+                    + "JOIN comandas c ON c.id_comanda = d.id_comanda WHERE d.id_detalle = ? FOR UPDATE", idDetalle);
+            if (d == null) throw new IllegalArgumentException("El plato no existe.");
+            exigirPropia(tx, d.get("id_usuario"));
+            exigirCuentaLibre(tx, Db.ent(d.get("id_comanda")), Db.ent(d.get("num_cuenta")));
+            String estado = Db.str(d.get("estado"));
+            if (estado.equals("ANULADO")) throw new IllegalArgumentException("Ese plato está anulado.");
+            BigDecimal cant = Db.dec(d.get("cantidad")), precio = Db.dec(d.get("precio_unitario")), desc = Db.dec(d.get("descuento"));
+            switch (que) {
+                case "DESCUENTO" -> { desc = valor; }
+                case "PRECIO" -> { precio = valor; }
+                case "CANTIDAD" -> {
+                    if (!estado.equals("PENDIENTE")) throw new IllegalArgumentException("Solo se cambia la cantidad de platos que aún no se envían a cocina.");
+                    if (valor.signum() <= 0) throw new IllegalArgumentException("La cantidad debe ser mayor que cero.");
+                    cant = valor;
+                }
+                default -> throw new IllegalArgumentException("Ajuste no válido.");
+            }
+            if (desc.compareTo(cant.multiply(precio)) > 0) throw new IllegalArgumentException("El descuento no puede ser mayor que el importe del plato.");
+            tx.exec("UPDATE comanda_detalle SET cantidad = ?, precio_unitario = ?, descuento = ? WHERE id_detalle = ?", cant, precio, desc, idDetalle);
+            Bitacora.registrar("AJUSTE_PLATO", "comanda_detalle", idDetalle, que + " → " + valor + " (" + motivo + ")");
+            return null;
+        });
+    }
+
     /** Anula un plato. Si aún no estaba listo, regresa los ingredientes al inventario. */
     public static void anularPlato(int idDetalle, String motivo) {
         Db.transaccion(tx -> {

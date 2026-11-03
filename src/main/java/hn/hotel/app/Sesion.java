@@ -58,15 +58,19 @@ public final class Sesion {
         ACCIONES.put("pos.autoconsumo", "Registrar autoconsumos (cuentas sin venta que descargan inventario)");
         ACCIONES.put("pos.corte_x", "Hacer corte X (cambio de turno)");
         ACCIONES.put("pos.corte_z", "Hacer corte Z (cierre del día)");
+        ACCIONES.put("pos.descuento", "Aplicar descuentos a un plato");
+        ACCIONES.put("pos.cambiar_precio", "Cambiar el precio de un plato");
+        ACCIONES.put("pos.cambiar_cantidad", "Cambiar la cantidad de un plato (antes de enviarlo)");
+        ACCIONES.put("pos.borrar_linea", "Quitar platos que aún no se envían a cocina");
         ACCIONES.put("compras.pagar", "Pagar a proveedores (cuentas por pagar)");
     }
 
     private static final Set<String> TODAS_POS = new java.util.LinkedHashSet<>(ACCIONES.keySet());
     private static final Map<String, Set<String>> ACCIONES_DEF = Map.of(
             "SUPERVISOR", TODAS_POS,
-            "RECEPCION", Set.of("pos.cobrar", "pos.precuenta", "pos.dividir", "pos.cambiar_mesa", "pos.cargar_habitacion", "pos.ver_todas", "pos.cambiar_lista", "pos.corte_x"),
-            "CAJERO", Set.of("pos.cobrar", "pos.precuenta", "pos.dividir", "pos.cambiar_mesa", "pos.cargar_habitacion", "pos.ver_todas", "pos.cambiar_lista", "pos.corte_x"),
-            "MESERO", Set.of("pos.precuenta", "pos.dividir", "pos.cambiar_mesa"),
+            "RECEPCION", Set.of("pos.cobrar", "pos.precuenta", "pos.dividir", "pos.cambiar_mesa", "pos.cargar_habitacion", "pos.ver_todas", "pos.cambiar_lista", "pos.corte_x", "pos.borrar_linea", "pos.cambiar_cantidad"),
+            "CAJERO", Set.of("pos.cobrar", "pos.precuenta", "pos.dividir", "pos.cambiar_mesa", "pos.cargar_habitacion", "pos.ver_todas", "pos.cambiar_lista", "pos.corte_x", "pos.borrar_linea", "pos.cambiar_cantidad"),
+            "MESERO", Set.of("pos.precuenta", "pos.dividir", "pos.cambiar_mesa", "pos.borrar_linea", "pos.cambiar_cantidad"),
             "CONTADOR", Set.of("compras.pagar")
     );
 
@@ -78,6 +82,17 @@ public final class Sesion {
     }
 
     private static final Map<String, Set<String>> PERSONALIZADOS = new java.util.HashMap<>();
+    /** Por rol: acciones bloqueadas que NO admiten autorización con clave (quedan negadas del todo). */
+    private static final Map<String, Set<String>> SIN_CLAVE = new java.util.HashMap<>();
+
+    /** ¿Esta acción, estando bloqueada para el rol actual, queda negada sin posibilidad de pedir clave de supervisor? */
+    public static synchronized boolean negadaSinClave(String accion) {
+        return !esAdmin() && SIN_CLAVE.getOrDefault(rol, Set.of()).contains(accion);
+    }
+
+    public static synchronized boolean pideClave(String rolx, String accion) {
+        return !SIN_CLAVE.getOrDefault(rolx, Set.of()).contains(accion);
+    }
 
     /** Lo que realmente puede hacer el rol: lo guardado en «Roles y permisos» o, si no se ha tocado, lo de fábrica. */
     public static synchronized Set<String> efectivos(String r) {
@@ -88,6 +103,11 @@ public final class Sesion {
     /** Lee de la base de datos los permisos personalizados (si el script 09 aún no se ejecutó, se usan los de fábrica). */
     public static synchronized void cargarPermisos() {
         PERSONALIZADOS.clear();
+        SIN_CLAVE.clear();
+        try {
+            for (Map<String, Object> f : hn.hotel.db.Db.query("SELECT rol, permiso FROM permisos_sin_clave"))
+                SIN_CLAVE.computeIfAbsent(String.valueOf(f.get("rol")), k -> new java.util.HashSet<>()).add(String.valueOf(f.get("permiso")));
+        } catch (RuntimeException e) { SIN_CLAVE.clear(); }
         try {
             for (Map<String, Object> f : hn.hotel.db.Db.query("SELECT rol, permiso FROM permisos_rol"))
                 PERSONALIZADOS.computeIfAbsent(String.valueOf(f.get("rol")), k -> new java.util.HashSet<>()).add(String.valueOf(f.get("permiso")));

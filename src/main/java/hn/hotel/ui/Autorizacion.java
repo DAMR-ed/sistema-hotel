@@ -17,6 +17,10 @@ public final class Autorizacion {
     /** Ejecuta la acción si el usuario tiene permiso o si un supervisor la autoriza. Devuelve false si se canceló. */
     public static boolean ejecutar(Component padre, String permiso, String descripcion, Runnable accion) {
         if (Sesion.permite(permiso)) { accion.run(); return true; }
+        if (Sesion.negadaSinClave(permiso)) {
+            Ui.error(padre, "Su rol no puede " + descripcion + ". Esta acción está bloqueada y no admite autorización con clave.");
+            return false;
+        }
         JTextField usuario = new JTextField(14);
         JPasswordField clave = new JPasswordField(14);
         Campos.Formulario f = new Campos.Formulario()

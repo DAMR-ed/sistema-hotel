@@ -1998,3 +1998,18 @@ BEGIN
   END IF;
 END$$
 DELIMITER ;
+
+-- ===== 17_permisos_sin_clave =====
+-- =====================================================================
+-- 17_permisos_sin_clave.sql  -  Por rol: acciones bloqueadas que NO se pueden autorizar con clave de supervisor
+-- Ejecutar UNA vez, con root, después de 16.
+-- Si un rol no tiene filas aquí, toda acción bloqueada pide clave de supervisor (como hasta ahora).
+-- =====================================================================
+
+CREATE TABLE IF NOT EXISTS permisos_sin_clave (
+  rol     VARCHAR(20) NOT NULL,
+  permiso VARCHAR(40) NOT NULL,
+  PRIMARY KEY (rol, permiso)
+) ENGINE=InnoDB;
+
+SELECT 'OK' AS resultado;

@@ -313,6 +313,9 @@ public class PosRestaurantePanel extends JPanel implements Actualizable {
         btnCobrar.setFont(btnCobrar.getFont().deriveFont(Font.BOLD));
         if (Sesion.tiene("pos.cobrar")) botones.add(btnCobrar);   // el mesero no ve nada para cobrar: solo levanta pedidos
         botones.add(Ui.boton("Quitar plato", this::anularPlato));
+        botones.add(Ui.boton("Descuento...", () -> Autorizacion.ejecutar(this, "pos.descuento", "aplicar descuentos", () -> ajustar("DESCUENTO"))));
+        botones.add(Ui.boton("Cambiar precio...", () -> Autorizacion.ejecutar(this, "pos.cambiar_precio", "cambiar precios", () -> ajustar("PRECIO"))));
+        botones.add(Ui.boton("Cambiar cantidad...", () -> Autorizacion.ejecutar(this, "pos.cambiar_cantidad", "cambiar cantidades", () -> ajustar("CANTIDAD"))));
         botones.add(Ui.boton("Marcar servido", this::marcarServido));
         botones.add(Ui.botonPrimario("Pedir cuenta", this::pedirCuenta));
         botones.add(Ui.boton("Pre-cuenta", () -> Autorizacion.ejecutar(this, "pos.precuenta", "imprimir la pre-cuenta", this::preCuenta)));
@@ -546,7 +549,24 @@ public class PosRestaurantePanel extends JPanel implements Actualizable {
             Ui.seguro(this, () -> { for (int id : ids) RestauranteService.anularPlato(id, motivo); cargarOrden(); });
         };
         if (hayEnviados) Autorizacion.ejecutar(this, "pos.anular_enviado", "quitar platos ya enviados a cocina", quitar);
-        else quitar.run();
+        else Autorizacion.ejecutar(this, "pos.borrar_linea", "quitar platos de la cuenta", quitar);
+    }
+
+    /** Descuento, cambio de precio o de cantidad sobre el plato seleccionado. */
+    private void ajustar(String que) {
+        List<Integer> ids = seleccionados();
+        if (ids.size() != 1) { Ui.info(this, "Seleccione un solo plato de la lista."); return; }
+        int fila = tLineas.getSelectedRow();
+        String titulo = que.equals("DESCUENTO") ? "Descuento en el plato (L)" : que.equals("PRECIO") ? "Nuevo precio unitario (L)" : "Nueva cantidad";
+        JTextField valor = new JTextField(10), motivo = new JTextField(22);
+        Campos.Formulario f = new Campos.Formulario().nota("Plato: " + mLineas.getValueAt(fila, 2))
+                .agregar(titulo + ":", valor).agregar("Motivo:", motivo);
+        if (que.equals("DESCUENTO")) f.nota("Es un monto en lempiras para toda la línea. Escriba 0 para quitar el descuento.");
+        if (!Campos.dialogo(this, titulo.replaceAll(" \\(L\\)", ""), f, () -> {
+            RestauranteService.ajustarPlato(ids.get(0), que, Ui.leerDinero(valor.getText(), "valor"), motivo.getText());
+            return true;
+        })) return;
+        cargarOrden();
     }
 
     /** Cuentas a las que se puede pasar un plato: todas las abiertas menos la actual, más una nueva. */

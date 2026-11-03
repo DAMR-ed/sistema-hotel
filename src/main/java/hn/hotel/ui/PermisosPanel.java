@@ -16,14 +16,16 @@ public class PermisosPanel extends JPanel implements Actualizable {
     private final JComboBox<String> cmbRol = new JComboBox<>(ROLES);
     private final JPanel pantallas = new JPanel(), acciones = new JPanel();
     private final Map<String, JCheckBox> cajas = new LinkedHashMap<>();
+    private final Map<String, JCheckBox> claves = new LinkedHashMap<>();   // «pedir clave de supervisor» si la acción está bloqueada
     private final JLabel estado = new JLabel(" ");
 
     public PermisosPanel() {
         setLayout(new BorderLayout(0, 12));
         setBorder(BorderFactory.createEmptyBorder(16, 20, 16, 20));
         add(new JLabel("<html><span style='font-size:20px'><b>Roles y permisos</b></span><br><span style='color:#64748B'>"
-                + "Marque lo que cada rol puede ver y hacer. Lo que no marque queda bloqueado: en el POS, el sistema pedirá usuario y contraseña de un "
-                + "supervisor (o administrador) que sí tenga ese permiso. El rol ADMIN siempre puede todo.</span></html>"), BorderLayout.NORTH);
+                + "Marque lo que cada rol puede ver y hacer. Lo que no marque queda bloqueado. En las acciones bloqueadas, la casilla "
+                + "«Pedir clave» decide: marcada, el sistema pide usuario y contraseña de un supervisor (o administrador) que sí tenga el permiso; "
+                + "sin marcar, la acción queda negada del todo. El rol ADMIN siempre puede todo.</span></html>"), BorderLayout.NORTH);
 
         pantallas.setLayout(new BoxLayout(pantallas, BoxLayout.Y_AXIS));
         acciones.setLayout(new BoxLayout(acciones, BoxLayout.Y_AXIS));
@@ -31,7 +33,7 @@ public class PermisosPanel extends JPanel implements Actualizable {
         izq.add(new JLabel("<html><b>Pantallas que ve</b></html>"), BorderLayout.NORTH);
         izq.add(new JScrollPane(pantallas), BorderLayout.CENTER);
         Tema.Tarjeta der = new Tema.Tarjeta(new BorderLayout(0, 6), null);
-        der.add(new JLabel("<html><b>Acciones del punto de venta</b> <span style='color:#64748B'>(si no se marca → pide autorización)</span></html>"), BorderLayout.NORTH);
+        der.add(new JLabel("<html><b>Acciones del punto de venta</b> <span style='color:#64748B'>(sin marcar = bloqueada)</span></html>"), BorderLayout.NORTH);
         der.add(new JScrollPane(acciones), BorderLayout.CENTER);
         JPanel centro = new JPanel(new GridLayout(1, 2, 14, 0));
         centro.setOpaque(false);
@@ -47,8 +49,17 @@ public class PermisosPanel extends JPanel implements Actualizable {
         }
         for (Map.Entry<String, String> a : Sesion.ACCIONES.entrySet()) {
             JCheckBox c = new JCheckBox(a.getValue());
+            JCheckBox k = new JCheckBox("Pedir clave", true);
+            k.setToolTipText("Si está bloqueada: marcada = un supervisor puede autorizarla con su clave; sin marcar = negada.");
+            c.addActionListener(e -> k.setEnabled(!c.isSelected()));
             cajas.put(a.getKey(), c);
-            acciones.add(c);
+            claves.put(a.getKey(), k);
+            JPanel fila = new JPanel(new BorderLayout(8, 0));
+            fila.setOpaque(false);
+            fila.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+            fila.add(c, BorderLayout.CENTER);
+            fila.add(k, BorderLayout.EAST);
+            acciones.add(fila);
         }
 
         JPanel sur = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
@@ -68,6 +79,10 @@ public class PermisosPanel extends JPanel implements Actualizable {
         String rol = (String) cmbRol.getSelectedItem();
         Set<String> ef = Sesion.efectivos(rol);
         for (Map.Entry<String, JCheckBox> e : cajas.entrySet()) e.getValue().setSelected(ef.contains(e.getKey()));
+        for (Map.Entry<String, JCheckBox> e : claves.entrySet()) {
+            e.getValue().setSelected(Sesion.pideClave(rol, e.getKey()));
+            e.getValue().setEnabled(!cajas.get(e.getKey()).isSelected());
+        }
         boolean personalizado = Db.scalar("SELECT 1 FROM permisos_rol WHERE rol = ? LIMIT 1", rol) != null;
         estado.setText(personalizado ? "   Permisos personalizados" : "   Permisos de fábrica");
     }
@@ -80,6 +95,10 @@ public class PermisosPanel extends JPanel implements Actualizable {
                 tx.exec("INSERT INTO permisos_rol (rol, permiso) VALUES (?, 'inicio')", rol);
                 for (Map.Entry<String, JCheckBox> e : cajas.entrySet())
                     if (e.getValue().isSelected()) tx.exec("INSERT INTO permisos_rol (rol, permiso) VALUES (?,?)", rol, e.getKey());
+                tx.exec("DELETE FROM permisos_sin_clave WHERE rol = ?", rol);
+                for (Map.Entry<String, JCheckBox> e : claves.entrySet())
+                    if (!cajas.get(e.getKey()).isSelected() && !e.getValue().isSelected())
+                        tx.exec("INSERT INTO permisos_sin_clave (rol, permiso) VALUES (?,?)", rol, e.getKey());
                 return null;
             });
             Bitacora.registrar("PERMISOS", "rol", rol, "Permisos actualizados");
@@ -92,6 +111,6 @@ public class PermisosPanel extends JPanel implements Actualizable {
     private void restablecer() {
         String rol = (String) cmbRol.getSelectedItem();
         if (!Ui.confirmar(this, "¿Volver los permisos de " + rol + " a los de fábrica?")) return;
-        Ui.seguro(this, () -> { Db.exec("DELETE FROM permisos_rol WHERE rol = ?", rol); Sesion.cargarPermisos(); cargar(); });
+        Ui.seguro(this, () -> { Db.exec("DELETE FROM permisos_rol WHERE rol = ?", rol); Db.exec("DELETE FROM permisos_sin_clave WHERE rol = ?", rol); Sesion.cargarPermisos(); cargar(); });
     }
 }
