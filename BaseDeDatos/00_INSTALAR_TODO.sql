@@ -2310,4 +2310,11 @@ CREATE TABLE IF NOT EXISTS usuario_puntos (
 -- Los usuarios que ya tenían un punto predeterminado lo conservan como permitido.
 INSERT IGNORE INTO usuario_puntos (id_usuario, id_punto) SELECT id_usuario, id_punto_venta FROM usuarios WHERE id_punto_venta IS NOT NULL;
 
+-- ===== 21_permisos_pantalla_clave =====
+CREATE TABLE IF NOT EXISTS permisos_con_clave (
+  rol     VARCHAR(20) NOT NULL,
+  permiso VARCHAR(40) NOT NULL,
+  PRIMARY KEY (rol, permiso)
+) ENGINE=InnoDB;
+
 SELECT 'OK' AS resultado;
